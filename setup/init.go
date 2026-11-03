@@ -48,6 +48,8 @@ var (
 	initCheckNameRE      = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*\n?$`)
 	initLocalToolsRE     = regexp.MustCompile(`(?:^|[;&]\s*)mix\s+local\.(?:hex|rebar)\b`)
 	initNpmScriptRE      = regexp.MustCompile(`\bnpm\s+(?:run\s+)?([a-zA-Z0-9:_-]+)\b`)
+	initNoTestsRE        = regexp.MustCompile(`(?m)(?:^\?[\t ]+\S+[\t ]+\[no test files\][\t ]*$|\b0 tests, 0 failures\b|\bRan 0 tests\b|\bNo tests found\b|\b0 passing\b)`)
+	initPositiveTestsRE  = regexp.MustCompile(`(?m)(?:\b0*[1-9][0-9]* tests\b|\bRan 0*[1-9][0-9]* tests\b|\b0*[1-9][0-9]* passing\b|^ok[\t ]+\S+|^PASS(?:[\t ]|$))`)
 	initMixTaskRE        = regexp.MustCompile(`\bmix\s+([a-z][a-z0-9_.-]*)\b`)
 )
 
@@ -897,6 +899,11 @@ func initExec(s *sys.Session, tools verify.Tools, command, dir string) (sys.Resu
 	return s.Run(command, dir, sys.Options{Env: env, KillGroupOnExit: true, Timeout: initCommandTimeout})
 }
 
+// initRanNoTests classifies only recognized reports; positive evidence wins.
+func initRanNoTests(output string) bool {
+	return initNoTestsRE.MatchString(output) && !initPositiveTestsRE.MatchString(output)
+}
+
 // initCommandFailure describes an unsuccessful verification command.
 func initCommandFailure(name, command string, r sys.Result) string {
 	if r.TimedOut {
@@ -1058,6 +1065,10 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 			}
 		}
 		if len(changed) == 0 {
+			if initRanNoTests(r.Output) {
+				res.leftOut = append(res.leftOut, fmt.Sprintf("%s (%s) ran no tests", check.Name, check.Run))
+				continue
+			}
 			res.checks = append(res.checks, check)
 			continue
 		}
