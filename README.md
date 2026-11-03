@@ -4,6 +4,24 @@ Kogen's setup: `kogen init` configures an existing project for Kogen. It detects
 
 It is a component of [Kogen](https://github.com/KogenAI/kogen), which pins an exact version of it and assembles the `kogen` program.
 
+## Standalone developer entry point
+
+Build this repository's setup command and run it on a checkout without an assembled
+`kogen` binary or adopting this component repository:
+
+```sh
+go build -o kogen-setup ./cmd/kogen-setup
+./kogen-setup /path/to/checkout
+```
+
+The command uses the caller's environment and home, including `KOGEN_NODE`,
+`KOGEN_QUINT`, and `KOGEN_CUCUMBER`. Its stdout is one JSON object: `exit` is
+Init's integer exit code; `configuration` is null if no valid configuration exists,
+or an object with `path` (`.kogen/project.yaml`) and `content` (the exact UTF-8
+YAML read after Init); and `error` is null on success or the error string on
+failure. The process returns Init's exit code. Init's human-readable output and
+any error go to stderr. Existing valid configuration is reported on repeat runs.
+
 ## Packages
 
 - `setup`: `Init`, the `kogen init` workflow, with the validation and merging of the model's proposal, and the setup conversation's model-facing policy: the init prompt (`setup/prompts/init.md`) and the `submit_configuration` tool definition.
