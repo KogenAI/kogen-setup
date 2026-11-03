@@ -1437,3 +1437,47 @@ func TestInitSetupPreservesTrackedFiles(t *testing.T) {
 		})
 	}
 }
+
+func TestInitUnionCommandEquivalence(t *testing.T) {
+	parallel(t)
+	cases := []struct {
+		name       string
+		a, b, want []string
+	}{
+		{"boundary and tabs", []string{"  npm\tci\n"}, []string{"npm  ci ", "\tnpm ci"}, []string{"  npm\tci\n"}},
+		{"quotes", []string{`echo "a  b"`, `echo 'a b'`}, []string{`echo "a b"`, `echo  "a  b"`, `echo "a\"  b"`, `echo "a\" b"`}, []string{`echo "a  b"`, `echo 'a b'`, `echo "a b"`, `echo "a\"  b"`, `echo "a\" b"`}},
+		{"arguments and newline", []string{"go test ./...", "echo a\nb"}, []string{"go test -race ./...", "go test ./... -race", "echo a b"}, []string{"go test ./...", "echo a\nb", "go test -race ./...", "go test ./... -race", "echo a b"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := initUnion(tc.a, tc.b); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("union = %#v, want %#v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestInitMergeWhitespaceCommandsAndExactPaths(t *testing.T) {
+	parallel(t)
+	detected := project.Detected{Checks: []project.Check{{Name: "test", Run: "old"}, {Name: "other", Run: "go test ./..."}}, Setup: []string{"npm ci"}, Fix: []string{"gofmt -w ."}, Protect: []string{"a b", "path"}}
+	proposed := InitProposal{Checks: []project.Check{{Name: "test", Run: "  go\ttest ./...\n"}, {Name: "duplicate", Run: "go  test ./..."}, {Name: "race", Run: "go test -race ./..."}}, Setup: []string{"npm  ci "}, Fix: []string{"gofmt\t-w .\n"}, Protect: []string{"a  b", " path", "path"}}
+	want := InitProposal{Checks: []project.Check{{Name: "test", Run: "  go\ttest ./...\n"}, {Name: "race", Run: "go test -race ./..."}}, Setup: []string{"npm ci"}, Fix: []string{"gofmt -w ."}, Protect: []string{"a b", "path", "a  b", " path"}}
+	if got := Merge(detected, proposed); !reflect.DeepEqual(got, want) {
+		t.Fatalf("merge = %#v, want %#v", got, want)
+	}
+}
+
+func TestInitVerifiesEquivalentCheckOnce(t *testing.T) {
+	parallel(t)
+	f := initNewFx(t, true, initSubmit(map[string]any{"setup": []any{}, "fix": []any{}, "checks": initCheckList("first", "true", "second", "true  "), "protect": []any{}}))
+	f.write("README.md", "# notes\n")
+	f.commitAll("notes")
+	_, errs := f.mustRun()
+	cfg := f.config()
+	if len(cfg.Checks) != 1 || cfg.Checks[0].Name != "first" || cfg.Checks[0].Run != "true" {
+		t.Fatalf("checks: %+v", cfg.Checks)
+	}
+	if !strings.Contains(errs, "kogen: checking first: true\n") || strings.Contains(errs, "kogen: checking second:") {
+		t.Fatalf("stderr: %s", errs)
+	}
+}

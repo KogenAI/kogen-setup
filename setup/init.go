@@ -665,8 +665,9 @@ func Merge(detected project.Detected, proposed InitProposal) InitProposal {
 	seen := map[string]bool{}
 	unique := []project.Check{}
 	for _, c := range checks {
-		if !seen[c.Run] {
-			seen[c.Run] = true
+		key := initCommandKey(c.Run)
+		if !seen[key] {
+			seen[key] = true
 			unique = append(unique, c)
 		}
 	}
@@ -674,11 +675,58 @@ func Merge(detected project.Detected, proposed InitProposal) InitProposal {
 		Setup:   initUnion(detected.Setup, proposed.Setup),
 		Fix:     initUnion(detected.Fix, proposed.Fix),
 		Checks:  unique,
-		Protect: initUnion(detected.Protect, proposed.Protect),
+		Protect: initPathUnion(detected.Protect, proposed.Protect),
 	}
 }
 
+// initCommandKey preserves quoted bytes while normalizing outside spaces and tabs.
+func initCommandKey(command string) string {
+	command = strings.TrimSpace(command)
+	var out strings.Builder
+	var quote byte
+	escaped := false
+	space := false
+	for i := 0; i < len(command); i++ {
+		c := command[i]
+		if quote == 0 && (c == ' ' || c == '\t') {
+			if !space {
+				out.WriteByte(' ')
+			}
+			space = true
+		} else {
+			out.WriteByte(c)
+			space = false
+			if (c == '\'' || c == '"') && !escaped {
+				if quote == 0 {
+					quote = c
+				} else if quote == c {
+					quote = 0
+				}
+			}
+		}
+		if c == '\\' {
+			escaped = !escaped
+		} else {
+			escaped = false
+		}
+	}
+	return out.String()
+}
+
 func initUnion(a, b []string) []string {
+	out := []string{}
+	seen := map[string]bool{}
+	for _, s := range append(slices.Clone(a), b...) {
+		key := initCommandKey(s)
+		if !seen[key] {
+			seen[key] = true
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func initPathUnion(a, b []string) []string {
 	out := []string{}
 	for _, s := range append(slices.Clone(a), b...) {
 		if !slices.Contains(out, s) {
