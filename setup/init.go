@@ -273,6 +273,15 @@ func initConfigure(ctx context.Context, s *sys.Session, in InitInput, repo *git.
 		checks = "none passed"
 	}
 	s.Puts("Checks: " + checks)
+	byName := map[string]project.Check{}
+	for _, c := range proposed.Checks {
+		byName[c.Name] = c
+	}
+	for _, c := range detected.Checks {
+		if p, ok := byName[c.Name]; ok && c.Run != p.Run {
+			s.Puts("Replaced: " + c.Name + " (" + c.Run + ") with (" + p.Run + ")")
+		}
+	}
 	if len(res.leftOut) > 0 {
 		s.Puts("Left out: " + strings.Join(res.leftOut, "; "))
 	}

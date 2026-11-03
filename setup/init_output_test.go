@@ -130,3 +130,55 @@ func TestInitFailedFixerOutputBoundaries(t *testing.T) {
 		t.Fatalf("config: %+v", cfg)
 	}
 }
+
+func TestInitReportsReplacedDetectedCheck(t *testing.T) {
+	parallel(t)
+	f := initNewFx(t, true, initSubmit(map[string]any{
+		"setup": []any{}, "fix": []any{},
+		"checks": initCheckList("go-test", "go test ./cmd/app"), "protect": []any{},
+	}))
+	f.program("go", `echo 'ok example.com/app 0.001s'`)
+	f.program("gofmt", `exit 0`)
+	f.write("go.mod", "module example.com/app\n\ngo 1.23\n")
+	f.write("cmd/app/main.go", "package main\nfunc main() {}\n")
+	f.commitAll("go app")
+	out, _ := f.mustRun()
+	line := "Replaced: go-test (go test ./...) with (go test ./cmd/app)"
+	if !strings.Contains(out, line+"\n") || strings.Index(out, "Checks: ") > strings.Index(out, line) || strings.Index(out, line) > strings.Index(out, "Acceptance: ") {
+		t.Fatalf("summary: %s", out)
+	}
+	for _, c := range f.config().Checks {
+		if c.Name == "go-test" && c.Run == "go test ./cmd/app" {
+			return
+		}
+	}
+	t.Fatalf("replacement missing from configuration: %+v", f.config().Checks)
+}
+
+func TestInitReportsReplacementLeftOutByVerification(t *testing.T) {
+	parallel(t)
+	f := initNewFx(t, true, initSubmit(map[string]any{
+		"setup": []any{}, "fix": []any{},
+		"checks": initCheckList("go-test", "go test ./cmd/app"), "protect": []any{},
+	}))
+	f.program("go", `case "$*" in "test ./cmd/app") exit 1;; esac
+echo 'ok example.com/app 0.001s'`)
+	f.program("gofmt", `exit 0`)
+	f.write("go.mod", "module example.com/app\n\ngo 1.23\n")
+	f.write("cmd/app/main.go", "package main\nfunc main() {}\n")
+	f.commitAll("go app")
+	out, _ := f.mustRun()
+	for _, line := range []string{
+		"Replaced: go-test (go test ./...) with (go test ./cmd/app)",
+		"Left out: go-test (go test ./cmd/app) failed with status 1",
+	} {
+		if !strings.Contains(out, line) {
+			t.Errorf("missing %q in summary: %s", line, out)
+		}
+	}
+	for _, c := range f.config().Checks {
+		if c.Name == "go-test" {
+			t.Errorf("failed check configured: %+v", c)
+		}
+	}
+}
