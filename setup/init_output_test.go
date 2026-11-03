@@ -93,3 +93,40 @@ func TestInitLeftOutIncludesNewlyIneligibleProtection(t *testing.T) {
 		t.Fatalf("protect: %v", cfg.Protect)
 	}
 }
+
+func TestInitFailedFixerOutputBoundaries(t *testing.T) {
+	parallel(t)
+	var commands []any
+	var blocks []string
+	for _, n := range []int{19, 20, 21} {
+		cmd := fmt.Sprintf(`i=1; while [ "$i" -le %d ]; do echo "$i"; i=$((i+1)); done; exit 5`, n)
+		commands = append(commands, cmd)
+		block := fmt.Sprintf("kogen: running fix-%d: %s\n", len(commands), cmd)
+		for i := max(1, n-19); i <= n; i++ {
+			block += fmt.Sprintf("  | %d\n", i)
+		}
+		blocks = append(blocks, block)
+	}
+	for _, n := range []int{199, 200, 201} {
+		cmd := fmt.Sprintf(`printf '%%0%dd\n' 0; exit 5`, n)
+		commands = append(commands, cmd)
+		blocks = append(blocks, fmt.Sprintf("kogen: running fix-%d: %s\n  | %s\n", len(commands), cmd, strings.Repeat("0", min(n, 200))))
+	}
+	f := initNewFx(t, true, initSubmit(map[string]any{
+		"setup": []any{}, "fix": commands, "checks": []any{}, "protect": []any{},
+	}))
+	f.write("README.md", "x\n")
+	f.commitAll("notes")
+	_, stderr := f.mustRun()
+	for i, block := range blocks {
+		if i+1 < len(blocks) {
+			block += strings.SplitN(blocks[i+1], "\n", 2)[0] + "\n"
+		}
+		if !strings.Contains(stderr, block) {
+			t.Errorf("missing fixer block %d: %q in %q", i+1, block, stderr)
+		}
+	}
+	if cfg := f.config(); len(cfg.Fix) != 0 {
+		t.Fatalf("config: %+v", cfg)
+	}
+}

@@ -922,9 +922,7 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 			return res, err
 		}
 		if failure := initCommandFailure(fmt.Sprintf("fix-%d", n), cmd, r); failure != "" {
-			if r.TimedOut {
-				initShowOutput(s, r.Output)
-			}
+			initShowOutput(s, r.Output)
 			res.leftOut = append(res.leftOut, failure)
 		} else {
 			res.fix = append(res.fix, cmd)

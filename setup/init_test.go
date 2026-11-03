@@ -907,7 +907,7 @@ func TestInitSetupThatFailsIsLeftOut(t *testing.T) {
 func TestInitLeavesOutAFailingFixerAndKeepsAPassingOne(t *testing.T) {
 	parallel(t)
 	f := initNewFx(t, true, initSubmit(map[string]any{
-		"setup": []any{}, "fix": []any{"true", "exit 3"}, "checks": []any{map[string]any{"name": "ok", "run": "true"}}, "protect": []any{}}))
+		"setup": []any{}, "fix": []any{"echo boom-fix >&2; exit 5", "true"}, "checks": []any{map[string]any{"name": "ok", "run": "true"}}, "protect": []any{}}))
 	f.write("README.md", "# notes\n")
 	f.commitAll("notes")
 	out, errs := f.mustRun()
@@ -915,10 +915,10 @@ func TestInitLeavesOutAFailingFixerAndKeepsAPassingOne(t *testing.T) {
 		"Initialized Kogen in "+f.repo,
 		"Setup: none",
 		"Checks: ok",
-		"Left out: fix-2 (exit 3) failed with status 3",
+		"Left out: fix-1 (echo boom-fix >&2; exit 5) failed with status 5",
 		"Acceptance: Cucumber bridge added in features/steps",
 		"Commit: {sha8} Add Kogen configuration")
-	for _, line := range []string{"kogen: checking ok: true", "kogen: running fix-1: true", "kogen: running fix-2: exit 3"} {
+	for _, line := range []string{"kogen: checking ok: true", "kogen: running fix-1: echo boom-fix >&2; exit 5\n  | boom-fix\nkogen: running fix-2: true"} {
 		if !strings.Contains(errs, line+"\n") {
 			t.Errorf("stderr lacks %q:\n%s", line, errs)
 		}
