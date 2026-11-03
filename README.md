@@ -4,6 +4,17 @@ Kogen's setup: `kogen init` configures an existing project for Kogen. It detects
 
 It is a component of [Kogen](https://github.com/KogenAI/kogen), which pins an exact version of it and assembles the `kogen` program.
 
+## Public checkout
+
+Install Go 1.27.2 (as required by `go.mod`), then clone and enter the repository:
+
+```sh
+git clone https://github.com/KogenAI/kogen-setup
+cd kogen-setup
+```
+
+For inquiries, contact contact@kogen.dev.
+
 ## Standalone developer entry point
 
 Build this repository's setup command and run it on a checkout without an assembled
@@ -43,7 +54,6 @@ go build ./... && go vet ./... && go test -race -count=1 ./...
 go test ./... -update
 ```
 
-The module depends on private KogenAI modules: set `GOPRIVATE=github.com/KogenAI/*`.
 
 ## License
 
