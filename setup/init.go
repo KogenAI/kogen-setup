@@ -48,6 +48,7 @@ var (
 	initManifestNames    = []string{"mix.exs", "package.json", "mix.lock", "package-lock.json", "npm-shrinkwrap.json", "go.mod", "go.sum"}
 	initWorkflowRE       = regexp.MustCompile(`^\.github/workflows/[^/]+\.ya?ml$`)
 	initCheckNameRE      = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*\n?$`)
+	initCommandPartsRE   = regexp.MustCompile(`;|&&|\|\||\||\n`)
 	initLocalToolsRE     = regexp.MustCompile(`(?:^|[;&]\s*)mix\s+local\.(?:hex|rebar)\b`)
 	initNpmScriptRE      = regexp.MustCompile(`\bnpm\s+(?:run\s+)?([a-zA-Z0-9:_-]+)\b`)
 	initNoTestsRE        = regexp.MustCompile(`(?m)(?:^\?[\t ]+\S+[\t ]+\[no test files\][\t ]*$|\b0 tests, 0 failures\b|\bRan 0 tests\b|\bNo tests found\b|\b0 passing\b)`)
@@ -508,6 +509,9 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 	proposed := map[string]bool{}
 	for _, c := range checks {
 		proposed[c.Name] = true
+		if initPublishesOrDeploys(c.Run) {
+			problems = append(problems, fmt.Sprintf("check %s (%s) publishes or deploys", c.Name, c.Run))
+		}
 		if initRunsNothing(c.Run) {
 			problems = append(problems, fmt.Sprintf("check %s (%s) runs nothing", c.Name, c.Run))
 		}
@@ -529,14 +533,39 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		}
 	}
 	for _, command := range setup {
+		if initPublishesOrDeploys(command) {
+			problems = append(problems, "setup command "+command+" publishes or deploys")
+		}
 		if initLocalToolsRE.MatchString(command) {
 			problems = append(problems, "setup command "+command+" is a one-time machine prerequisite, not recurring project setup")
+		}
+	}
+	for _, command := range fix {
+		if initPublishesOrDeploys(command) {
+			problems = append(problems, "fix command "+command+" publishes or deploys")
 		}
 	}
 	if len(problems) > 0 {
 		return InitProposal{}, problems
 	}
 	return InitProposal{Setup: setup, Fix: fix, Checks: checks, Protect: protect}, nil
+}
+
+// initPublishesOrDeploys matches the specified initial command words in each part.
+func initPublishesOrDeploys(command string) bool {
+	for _, part := range initCommandPartsRE.Split(command, -1) {
+		words := strings.Fields(part)
+		if len(words) < 2 {
+			continue
+		}
+		action := words[0] + " " + words[1]
+		publishing := slices.Contains([]string{"git push", "npm publish", "yarn publish", "pnpm publish", "cargo publish", "gem push", "twine upload", "docker push", "mix hex.publish"}, action)
+		deploying := slices.Contains([]string{"terraform apply", "kubectl apply", "helm install", "helm upgrade"}, action)
+		if (publishing || deploying) && !slices.Contains(words[2:], "--dry-run") && !(publishing && slices.Contains(words[2:], "-n")) {
+			return true
+		}
+	}
+	return false
 }
 
 // initRunsNothing recognizes only a small, literal subset of shell commands.

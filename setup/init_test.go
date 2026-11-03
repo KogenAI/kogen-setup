@@ -1530,3 +1530,80 @@ func TestInitCorrectsRunsNothingCheck(t *testing.T) {
 		t.Fatalf("checks: %v", checks)
 	}
 }
+
+func TestInitValidatePublishingCommands(t *testing.T) {
+	publishing := []string{"git push", "npm publish", "yarn publish", "pnpm publish", "cargo publish", "gem push", "twine upload", "docker push", "mix hex.publish"}
+	deploying := []string{"terraform apply", "kubectl apply", "helm install", "helm upgrade"}
+	for _, action := range append(append([]string{}, publishing...), deploying...) {
+		for _, kind := range []string{"setup", "fix", "checks"} {
+			for _, suffix := range []string{"", " --dry-run", " -n"} {
+				command := action + suffix
+				args := map[string]any{kind: []any{command}}
+				context := kind
+				if kind == "checks" {
+					args[kind] = initCheckList("release", command)
+					context = "check release"
+				}
+				_, problems := Validate(args, InitContext{})
+				reject := suffix == "" || (suffix == " -n" && slices.Contains(deploying, action))
+				if reject {
+					if len(problems) != 1 || !strings.Contains(problems[0], context) || !strings.Contains(problems[0], command) || !strings.Contains(problems[0], "publishes or deploys") {
+						t.Fatalf("%s %q: %q", kind, command, problems)
+					}
+				} else if len(problems) != 0 {
+					t.Fatalf("%s %q: %q", kind, command, problems)
+				}
+			}
+		}
+	}
+	for _, tc := range []struct {
+		command string
+		reject  bool
+	}{
+		{"echo ok; npm publish", true}, {"echo ok && git push", true}, {"false || npm publish", true}, {"cat x | npm publish", true}, {"echo ok\nnpm publish", true},
+		{"npm publish --dry-run && git push", true}, {"  git   push origin main  ", true},
+		{"npm publish --dry-run=1", true}, {"npm publish -nother", true},
+		{"printf '%s' 'git push' && npm test", false}, {"git pusher", false}, {"npm test", false}, {"git diff --check", false},
+	} {
+		_, problems := Validate(map[string]any{"checks": initCheckList("a", tc.command)}, InitContext{})
+		if (len(problems) != 0) != tc.reject {
+			t.Errorf("%q: %q", tc.command, problems)
+		}
+	}
+	_, problems := Validate(map[string]any{}, InitContext{DetectedChecks: []project.Check{{Name: "release", Run: "git push"}}})
+	if len(problems) != 0 {
+		t.Fatalf("detected check: %q", problems)
+	}
+}
+
+func TestInitCorrectsPublishingCheckBeforePush(t *testing.T) {
+	f := initNewFx(t, true, initSubmit(map[string]any{"checks": initCheckList("release", "git push origin HEAD:refs/heads/main")}), initNothing())
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	initTestRun(t, f.repo, "git", "init", "--bare", remote)
+	marker := filepath.Join(t.TempDir(), "pushed")
+	if err := os.WriteFile(filepath.Join(remote, "hooks", "pre-receive"), []byte("#!/bin/sh\ntouch "+marker+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f.git("remote", "add", "origin", remote)
+	f.write("README.md", "notes\n")
+	f.commitAll("notes")
+	exit, out, _, err := f.run("")
+	if err != nil || exit != 0 || !strings.Contains(out, "Checks: none found") {
+		t.Fatalf("exit %d, error %v, output %q", exit, err, out)
+	}
+	if len(f.requests()) != 2 {
+		t.Fatalf("requests: %d", len(f.requests()))
+	}
+	body, _ := json.Marshal(f.requests()[1])
+	for _, text := range []string{"check release", "git push origin HEAD:refs/heads/main", "publishes or deploys"} {
+		if !strings.Contains(string(body), text) {
+			t.Fatalf("correction: %s", body)
+		}
+	}
+	if checks := f.config().Checks; len(checks) != 0 {
+		t.Fatalf("checks: %v", checks)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("push marker stat: %v", err)
+	}
+}
