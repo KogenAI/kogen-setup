@@ -435,6 +435,7 @@ func initNewFx(t *testing.T, signedIn bool, script ...initSSE) *initFx {
 	f.program("mix", `case "$*" in
   "deps.get") exit 0;;
   "format --check-formatted") exit 0;;
+  "format") exit 0;;
   "compile --warnings-as-errors") echo "warning: unused variable" >&2; exit 1;;
   "test") exit 0;;
 esac
@@ -897,9 +898,56 @@ func TestInitSetupThatFailsIsLeftOut(t *testing.T) {
 		"Commit: {sha8} Add Kogen configuration",
 		initNextChecks)
 	cfg := f.config()
-	// Without a passing check nothing is protected; fixers are kept untested.
+	// Without a passing check nothing is protected; a passing fixer is kept.
 	if len(cfg.Protect) != 0 || !reflect.DeepEqual(cfg.Fix, []string{"echo fixer"}) {
 		t.Fatalf("config %+v", cfg)
+	}
+}
+
+func TestInitLeavesOutAFailingFixerAndKeepsAPassingOne(t *testing.T) {
+	parallel(t)
+	f := initNewFx(t, true, initSubmit(map[string]any{
+		"setup": []any{}, "fix": []any{"true", "exit 3"}, "checks": []any{map[string]any{"name": "ok", "run": "true"}}, "protect": []any{}}))
+	f.write("README.md", "# notes\n")
+	f.commitAll("notes")
+	out, errs := f.mustRun()
+	initWantLines(t, out,
+		"Initialized Kogen in "+f.repo,
+		"Setup: none",
+		"Checks: ok",
+		"Left out: fix-2 (exit 3) failed with status 3",
+		"Acceptance: Cucumber bridge added in features/steps",
+		"Commit: {sha8} Add Kogen configuration")
+	for _, line := range []string{"kogen: checking ok: true", "kogen: running fix-1: true", "kogen: running fix-2: exit 3"} {
+		if !strings.Contains(errs, line+"\n") {
+			t.Errorf("stderr lacks %q:\n%s", line, errs)
+		}
+	}
+	if cfg := f.config(); !reflect.DeepEqual(cfg.Fix, []string{"true"}) {
+		t.Fatalf("config %+v", cfg)
+	}
+}
+
+func TestInitRunsFixersOnceAfterTheChecksOnTheCopy(t *testing.T) {
+	parallel(t)
+	rewrite := `echo rewritten > README.md`
+	again := `echo run >> runs.txt && test ! -e .git && test -n "$KOGEN_NODE"`
+	f := initNewFx(t, true, initSubmit(map[string]any{
+		"setup": []any{}, "fix": []any{rewrite, again}, "checks": []any{map[string]any{"name": "same", "run": "grep -qx '# notes' README.md"}}, "protect": []any{}}))
+	f.write("README.md", "# notes\n")
+	f.commitAll("notes")
+	out, _ := f.mustRun()
+	initWantLines(t, out,
+		"Initialized Kogen in "+f.repo,
+		"Setup: none",
+		"Checks: same",
+		"Acceptance: Cucumber bridge added in features/steps",
+		"Commit: {sha8} Add Kogen configuration")
+	if cfg := f.config(); !reflect.DeepEqual(cfg.Fix, []string{rewrite, again}) {
+		t.Fatalf("config %+v", cfg)
+	}
+	if f.read("README.md") != "# notes\n" || f.exists("runs.txt") || f.dirtyPaths() != "" {
+		t.Fatalf("fixers reached the working tree: %q", f.dirtyPaths())
 	}
 }
 

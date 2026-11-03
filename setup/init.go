@@ -877,7 +877,20 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 		}
 		res.leftOut = append(res.leftOut, fmt.Sprintf("%s (%s) changed %s%s", check.Name, check.Run, strings.Join(displayed, ", "), suffix))
 	}
-	res.fix = candidates.Fix
+	// Fixers run last, once each, so they cannot change which checks are kept.
+	for i, cmd := range candidates.Fix {
+		n := i + 1
+		s.Progress(fmt.Sprintf("kogen: running fix-%d: %s", n, cmd))
+		r, err := initExec(s, in.Tools, cmd, clone)
+		if err != nil {
+			return res, err
+		}
+		if r.Status == 0 {
+			res.fix = append(res.fix, cmd)
+		} else {
+			res.leftOut = append(res.leftOut, fmt.Sprintf("fix-%d (%s) failed with status %d", n, cmd, r.Status))
+		}
+	}
 	if len(res.checks) > 0 {
 		res.protect = candidates.Protect
 	}
