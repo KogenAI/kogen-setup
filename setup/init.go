@@ -812,6 +812,10 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 	// Setup runs before every Build, so each entry must run twice on the same tree (SET-12).
 	for i, cmd := range candidates.Setup {
 		n := i + 1
+		snapshot, err := initTrackedSnapshot(clone, tracked)
+		if err != nil {
+			return res, err
+		}
 		s.Progress(fmt.Sprintf("kogen: running setup-%d: %s", n, cmd))
 		r, err := initExec(s, in.Tools, cmd, clone)
 		if err != nil {
@@ -826,6 +830,11 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 		if err != nil {
 			return res, err
 		}
+		firstSnapshot, err := initTrackedSnapshot(clone, tracked)
+		if err != nil {
+			return res, err
+		}
+		firstChanged := initTrackedChanged(tracked, snapshot, firstSnapshot)
 		s.Progress(fmt.Sprintf("kogen: running setup-%d again: %s", n, cmd))
 		again, err := initExec(s, in.Tools, cmd, clone)
 		if err != nil {
@@ -833,6 +842,13 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 		}
 		second, err := initTreeState(repo, gitDir, clone)
 		if err != nil {
+			return res, err
+		}
+		secondSnapshot, err := initTrackedSnapshot(clone, tracked)
+		if err != nil {
+			return res, err
+		}
+		if err := initRestoreTracked(clone, snapshot, initTrackedChanged(tracked, snapshot, secondSnapshot)); err != nil {
 			return res, err
 		}
 		switch {
@@ -857,6 +873,8 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 			}
 			sort.Strings(changed)
 			res.leftOut = append(res.leftOut, fmt.Sprintf("setup-%d (%s) is not repeatable: its second run changed %s", n, cmd, strings.Join(changed, ", ")))
+		case len(firstChanged) > 0:
+			res.leftOut = append(res.leftOut, fmt.Sprintf("setup-%d (%s) changed %s", n, cmd, initChangedDisplay(firstChanged)))
 		default:
 			res.setup = append(res.setup, cmd)
 		}
@@ -910,27 +928,10 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 			continue
 		}
 		sort.Strings(changed)
-		for _, p := range changed {
-			// A check may replace a tracked file's parent directory with a file.
-			for dir := filepath.Dir(p); dir != "."; dir = filepath.Dir(dir) {
-				name := filepath.Join(clone, dir)
-				if st, err := os.Lstat(name); err == nil && !st.IsDir() {
-					if err := os.RemoveAll(name); err != nil {
-						return res, err
-					}
-				}
-			}
-			if err := snapshot[p].restore(filepath.Join(clone, p)); err != nil {
-				return res, err
-			}
+		if err := initRestoreTracked(clone, snapshot, changed); err != nil {
+			return res, err
 		}
-		displayed := changed
-		suffix := ""
-		if len(displayed) > 5 {
-			displayed = displayed[:5]
-			suffix = ", ..."
-		}
-		res.leftOut = append(res.leftOut, fmt.Sprintf("%s (%s) changed %s%s", check.Name, check.Run, strings.Join(displayed, ", "), suffix))
+		res.leftOut = append(res.leftOut, fmt.Sprintf("%s (%s) changed %s", check.Name, check.Run, initChangedDisplay(changed)))
 	}
 	// Fixers run last, once each, so they cannot change which checks are kept.
 	for i, cmd := range candidates.Fix {
@@ -948,6 +949,45 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 		}
 	}
 	return res, nil
+}
+
+func initTrackedChanged(tracked []string, before, after map[string]initSavedFile) []string {
+	var changed []string
+	for _, p := range tracked {
+		a, b := before[p], after[p]
+		if a.exists != b.exists || a.mode != b.mode || !bytes.Equal(a.data, b.data) {
+			changed = append(changed, p)
+		}
+	}
+	sort.Strings(changed)
+	return changed
+}
+
+func initRestoreTracked(clone string, snapshot map[string]initSavedFile, changed []string) error {
+	for _, p := range changed {
+		// A command may replace a tracked file's parent directory with a file.
+		for dir := filepath.Dir(p); dir != "."; dir = filepath.Dir(dir) {
+			name := filepath.Join(clone, dir)
+			if st, err := os.Lstat(name); err == nil && !st.IsDir() {
+				if err := os.RemoveAll(name); err != nil {
+					return err
+				}
+			}
+		}
+		if err := snapshot[p].restore(filepath.Join(clone, p)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func initChangedDisplay(changed []string) string {
+	suffix := ""
+	if len(changed) > 5 {
+		changed = changed[:5]
+		suffix = ", ..."
+	}
+	return strings.Join(changed, ", ") + suffix
 }
 
 type initSavedFile struct {

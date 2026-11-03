@@ -1315,10 +1315,10 @@ func TestInitCommitSubjectsFollowTheRepositoryState(t *testing.T) {
 func TestInitRejectsMutatingChecksAndRestoresSetupState(t *testing.T) {
 	parallel(t)
 	f := initNewFx(t, true, initSubmit(map[string]any{
-		"setup": []any{"echo setup > a.txt"}, "fix": []any{}, "checks": []any{
+		"setup": []any{"echo setup > setup.txt"}, "fix": []any{}, "checks": []any{
 			map[string]any{"name": "fmt", "run": "echo y > a.txt"},
 			map[string]any{"name": "delete", "run": "rm b.txt"},
-			map[string]any{"name": "ok", "run": `test "$(cat a.txt)" = setup && test "$(cat b.txt)" = x`},
+			map[string]any{"name": "ok", "run": `test "$(cat setup.txt)" = setup && test "$(cat a.txt)" = x && test "$(cat b.txt)" = x`},
 			map[string]any{"name": "scratch", "run": "echo note >> scratch.log"},
 		}, "protect": []any{}}))
 	f.write("README.md", "fixture\n")
@@ -1326,7 +1326,7 @@ func TestInitRejectsMutatingChecksAndRestoresSetupState(t *testing.T) {
 	f.write("b.txt", "x\n")
 	f.commitAll("seed")
 	out, _ := f.mustRun()
-	initWantLines(t, out, "Initialized Kogen in "+f.repo, "Setup: echo setup > a.txt", "Checks: ok, scratch", "Left out: fmt (echo y > a.txt) changed a.txt; delete (rm b.txt) changed b.txt", "Acceptance: Cucumber bridge added in features/steps", "Commit: {sha8} Add Kogen configuration")
+	initWantLines(t, out, "Initialized Kogen in "+f.repo, "Setup: echo setup > setup.txt", "Checks: ok, scratch", "Left out: fmt (echo y > a.txt) changed a.txt; delete (rm b.txt) changed b.txt", "Acceptance: Cucumber bridge added in features/steps", "Commit: {sha8} Add Kogen configuration")
 	cfg := f.config()
 	if len(cfg.Checks) != 2 || cfg.Checks[0].Name != "ok" || cfg.Checks[1].Name != "scratch" {
 		t.Fatalf("checks: %+v", cfg.Checks)
@@ -1396,6 +1396,43 @@ func TestInitResultFiltersProtectionForKeptChecks(t *testing.T) {
 			res.filterProtect(protect, contents)
 			if !reflect.DeepEqual(res.protect, tc.want) || !reflect.DeepEqual(res.leftOut, append([]string{"failed check"}, tc.omitted...)) {
 				t.Fatalf("protect %v, left out %v", res.protect, res.leftOut)
+			}
+		})
+	}
+}
+
+func TestInitSetupPreservesTrackedFiles(t *testing.T) {
+	cases := []struct {
+		name, command, reason string
+	}{
+		{"content", "grep -q y a.txt || echo y >> a.txt", "changed a.txt"},
+		{"mode", "chmod +x a.txt", "changed a.txt"},
+		{"existence", "rm -f a.txt", "changed a.txt"},
+		{"five", "printf y > e.txt; printf y > d.txt; printf y > c.txt; printf y > b.txt; printf y > a.txt", "changed a.txt, b.txt, c.txt, d.txt, e.txt"},
+		{"six", "printf y > f.txt; printf y > e.txt; printf y > d.txt; printf y > c.txt; printf y > b.txt; printf y > a.txt", "changed a.txt, b.txt, c.txt, d.txt, e.txt, ..."},
+		{"second failure", "grep -q y a.txt && exit 7; echo y >> a.txt", "is not repeatable: its second run failed with status 7"},
+		{"second change", "echo y >> a.txt", "is not repeatable: its second run changed a.txt"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := initNewFx(t, true, initSubmit(map[string]any{
+				"setup": []any{"mkdir -p deps && echo d > deps/f", "echo u > scratch", tc.command, `test "$(cat a.txt)" = x && test -f deps/f && test -f scratch`},
+				"fix":   []any{}, "checks": []any{map[string]any{"name": "ok", "run": `test "$(cat a.txt b.txt c.txt d.txt e.txt f.txt | tr -d '\n')" = xxxxxx && test ! -x a.txt && test -f deps/f && test -f scratch`}}, "protect": []any{},
+			}))
+			f.write("README.md", "fixture\n")
+			f.write(".gitignore", "deps/\n")
+			for _, name := range []string{"a.txt", "b.txt", "c.txt", "d.txt", "e.txt", "f.txt"} {
+				f.write(name, "x\n")
+			}
+			f.commitAll("fixture")
+			out, _ := f.mustRun()
+			want := "Left out: setup-3 (" + tc.command + ") " + tc.reason
+			if !strings.Contains(out, want+"\n") {
+				t.Fatalf("missing %q in %s", want, out)
+			}
+			cfg := f.config()
+			if !reflect.DeepEqual(cfg.Setup, []string{"mkdir -p deps && echo d > deps/f", "echo u > scratch", `test "$(cat a.txt)" = x && test -f deps/f && test -f scratch`}) || len(cfg.Checks) != 1 || cfg.Checks[0].Name != "ok" {
+				t.Fatalf("config %+v; output %s", cfg, out)
 			}
 		})
 	}
