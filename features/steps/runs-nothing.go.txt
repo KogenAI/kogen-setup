@@ -1,0 +1,40 @@
+package setup
+
+import (
+ "encoding/json"
+ "os"
+ "testing"
+
+ "github.com/KogenAI/kogen-coordinator/project"
+)
+
+func TestRunsNothingCapture(t *testing.T) {
+ var input struct { Cases []struct { Name string `json:"name"`; Run string `json:"run"` }; Name string; Run string }
+ if err := json.Unmarshal([]byte(os.Getenv("RN_INPUT")), &input); err != nil { t.Fatal(err) }
+ result := map[string]any{}
+ if input.Cases != nil {
+  rows := []any{}
+  for _, c := range input.Cases {
+   _, problems := Validate(map[string]any{"checks": []map[string]any{{"name": c.Name, "run": c.Run}}}, InitContext{})
+   rows = append(rows, problems)
+  }
+  _, detectedProblems := Validate(map[string]any{}, InitContext{DetectedChecks: []project.Check{{Name:"detected", Run:"true"}}})
+  result["rows"] = rows
+  result["detectedProblems"] = detectedProblems
+ } else {
+  f := initNewFx(t, true, initSubmit(map[string]any{"checks": []map[string]any{{"name":input.Name,"run":input.Run}}}), initNothing())
+  f.write("README.md", "notes\n")
+  f.commitAll("notes")
+  exit, out, _, err := f.run("")
+  result["exit"] = exit
+  result["stdout"] = out
+  if err != nil { result["error"] = err.Error() }
+  result["requests"] = len(f.bodies)
+  result["bodies"] = f.bodies
+  cfg, loadErr := project.LoadConfig(f.repo)
+  if loadErr != nil { t.Fatal(loadErr) }
+  result["checks"] = cfg.Checks
+ }
+ b, err := json.Marshal(result); if err != nil { t.Fatal(err) }
+ if err := os.WriteFile(os.Getenv("RN_OUTPUT"), b, 0600); err != nil { t.Fatal(err) }
+}

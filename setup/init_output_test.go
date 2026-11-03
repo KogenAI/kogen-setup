@@ -47,7 +47,7 @@ func TestInitLeftOutOutputAndConfiguration(t *testing.T) {
 	parallel(t)
 	f := initNewFx(t, true, initSubmit(map[string]any{
 		"setup": []any{"echo setup-out; echo setup-err >&2; exit 4", "echo retained-setup"},
-		"fix":   []any{}, "checks": []any{map[string]any{"name": "bad", "run": "echo check-out; echo check-err >&2; exit 7"}, map[string]any{"name": "good", "run": "echo retained-check"}}, "protect": []any{},
+		"fix":   []any{}, "checks": []any{map[string]any{"name": "bad", "run": "echo check-out; echo check-err >&2; exit 7"}, map[string]any{"name": "good", "run": "test -f README.md && echo retained-check"}}, "protect": []any{},
 	}))
 	f.write("README.md", "x\n")
 	f.commitAll("notes")
@@ -70,7 +70,7 @@ func TestInitLeftOutOutputAndConfiguration(t *testing.T) {
 		t.Errorf("stdout: %s", out)
 	}
 	cfg := f.config()
-	if !reflect.DeepEqual(cfg.Setup, []string{"echo retained-setup"}) || len(cfg.Checks) != 1 || cfg.Checks[0].Name != "good" || cfg.Checks[0].Run != "echo retained-check" {
+	if !reflect.DeepEqual(cfg.Setup, []string{"echo retained-setup"}) || len(cfg.Checks) != 1 || cfg.Checks[0].Name != "good" || cfg.Checks[0].Run != "test -f README.md && echo retained-check" {
 		t.Errorf("config: %+v", cfg)
 	}
 }
@@ -79,7 +79,7 @@ func TestInitLeftOutIncludesNewlyIneligibleProtection(t *testing.T) {
 	parallel(t)
 	f := initNewFx(t, true, initSubmit(map[string]any{
 		"setup": []any{}, "fix": []any{},
-		"checks":  initCheckList("lint", "npm run lint", "ok", "true"),
+		"checks":  initCheckList("lint", "npm run lint", "ok", "test -f package.json"),
 		"protect": []any{"package.json"},
 	}))
 	f.write("package.json", `{"scripts":{"lint":"eslint ."}}`)

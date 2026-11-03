@@ -495,6 +495,9 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 	proposed := map[string]bool{}
 	for _, c := range checks {
 		proposed[c.Name] = true
+		if initRunsNothing(c.Run) {
+			problems = append(problems, fmt.Sprintf("check %s (%s) runs nothing", c.Name, c.Run))
+		}
 	}
 	var effective []project.Check
 	for _, c := range ctx.DetectedChecks {
@@ -521,6 +524,89 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		return InitProposal{}, problems
 	}
 	return InitProposal{Setup: setup, Fix: fix, Checks: checks, Protect: protect}, nil
+}
+
+// initRunsNothing recognizes only a small, literal subset of shell commands.
+func initRunsNothing(command string) bool {
+	var words []string
+	var word strings.Builder
+	inWord := false
+	quote := byte(0)
+	validCommand := func() bool {
+		if inWord {
+			words = append(words, word.String())
+			word.Reset()
+			inWord = false
+		}
+		valid := false
+		if len(words) > 0 {
+			switch words[0] {
+			case "true", ":":
+				valid = len(words) == 1
+			case "exit":
+				valid = len(words) == 2 && words[1] == "0"
+			case "echo", "printf":
+				valid = true
+			}
+		}
+		words = nil
+		return valid
+	}
+	for i := 0; i < len(command); i++ {
+		c := command[i]
+		if quote != 0 {
+			if c == quote {
+				quote = 0
+			} else if quote == '"' && (c == '$' || c == '`') {
+				return false
+			} else if quote == '"' && c == '\\' {
+				if i+1 >= len(command) {
+					return false
+				}
+				next := command[i+1]
+				if strings.ContainsRune("$`\\\"", rune(next)) {
+					word.WriteByte(next)
+					i++
+				} else if next == '\n' {
+					i++
+				} else {
+					word.WriteByte(c)
+				}
+			} else {
+				word.WriteByte(c)
+			}
+			continue
+		}
+		switch c {
+		case '\'', '"':
+			quote = c
+			inWord = true
+		case ' ', '\t', '\r':
+			if inWord {
+				words = append(words, word.String())
+				word.Reset()
+				inWord = false
+			}
+		case ';', '|', '&', '\n':
+			if !validCommand() {
+				return false
+			}
+			if c == '&' {
+				if i+1 >= len(command) || command[i+1] != '&' {
+					return false
+				}
+				i++
+			} else if c == '|' && i+1 < len(command) && command[i+1] == '|' {
+				i++
+			}
+		case '$', '`', '>', '<', '(', ')', '\\', '*', '?', '[', ']', '{', '}', '#', '~':
+			return false
+		default:
+			word.WriteByte(c)
+			inWord = true
+		}
+	}
+	return quote == 0 && validCommand()
 }
 
 func initStrings(args map[string]any, key string) ([]string, string) {

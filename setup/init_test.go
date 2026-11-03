@@ -157,7 +157,7 @@ func TestInitValidateProtectionIncludesDetectedChecks(t *testing.T) {
 		t.Fatalf("got %+v %q", got, problems)
 	}
 	// The model's own check of the same name replaces the detected one.
-	args["checks"] = initCheckList("test", "echo ok")
+	args["checks"] = initCheckList("test", "test -f README.md")
 	if _, problems := Validate(args, ctx); len(problems) != 1 {
 		t.Fatalf("problems %q", problems)
 	}
@@ -907,7 +907,7 @@ func TestInitSetupThatFailsIsLeftOut(t *testing.T) {
 func TestInitLeavesOutAFailingFixerAndKeepsAPassingOne(t *testing.T) {
 	parallel(t)
 	f := initNewFx(t, true, initSubmit(map[string]any{
-		"setup": []any{}, "fix": []any{"echo boom-fix >&2; exit 5", "true"}, "checks": []any{map[string]any{"name": "ok", "run": "true"}}, "protect": []any{}}))
+		"setup": []any{}, "fix": []any{"echo boom-fix >&2; exit 5", "true"}, "checks": []any{map[string]any{"name": "ok", "run": "test -f README.md"}}, "protect": []any{}}))
 	f.write("README.md", "# notes\n")
 	f.commitAll("notes")
 	out, errs := f.mustRun()
@@ -918,7 +918,7 @@ func TestInitLeavesOutAFailingFixerAndKeepsAPassingOne(t *testing.T) {
 		"Left out: fix-1 (echo boom-fix >&2; exit 5) failed with status 5",
 		"Acceptance: Cucumber bridge added in features/steps",
 		"Commit: {sha8} Add Kogen configuration")
-	for _, line := range []string{"kogen: checking ok: true", "kogen: running fix-1: echo boom-fix >&2; exit 5\n  | boom-fix\nkogen: running fix-2: true"} {
+	for _, line := range []string{"kogen: checking ok: test -f README.md", "kogen: running fix-1: echo boom-fix >&2; exit 5\n  | boom-fix\nkogen: running fix-2: true"} {
 		if !strings.Contains(errs, line+"\n") {
 			t.Errorf("stderr lacks %q:\n%s", line, errs)
 		}
@@ -1342,7 +1342,7 @@ func TestInitMutationPathListAtFive(t *testing.T) {
 		{"for p in e.txt d.txt c.txt b.txt a.txt; do echo y > \"$p\"; done", "a.txt, b.txt, c.txt, d.txt, e.txt"},
 	} {
 		t.Run(tc.paths, func(t *testing.T) {
-			f := initNewFx(t, true, initSubmit(map[string]any{"setup": []any{}, "fix": []any{}, "checks": []any{map[string]any{"name": "fmt", "run": tc.command}, map[string]any{"name": "ok", "run": "true"}}, "protect": []any{}}))
+			f := initNewFx(t, true, initSubmit(map[string]any{"setup": []any{}, "fix": []any{}, "checks": []any{map[string]any{"name": "fmt", "run": tc.command}, map[string]any{"name": "ok", "run": "test -f README.md"}}, "protect": []any{}}))
 			f.write("README.md", "fixture\n")
 			for _, p := range []string{"a.txt", "b.txt", "c.txt", "d.txt", "e.txt"} {
 				f.write(p, "x\n")
@@ -1469,15 +1469,64 @@ func TestInitMergeWhitespaceCommandsAndExactPaths(t *testing.T) {
 
 func TestInitVerifiesEquivalentCheckOnce(t *testing.T) {
 	parallel(t)
-	f := initNewFx(t, true, initSubmit(map[string]any{"setup": []any{}, "fix": []any{}, "checks": initCheckList("first", "true", "second", "true  "), "protect": []any{}}))
+	f := initNewFx(t, true, initSubmit(map[string]any{"setup": []any{}, "fix": []any{}, "checks": initCheckList("first", "test -f README.md", "second", "test -f README.md  "), "protect": []any{}}))
 	f.write("README.md", "# notes\n")
 	f.commitAll("notes")
 	_, errs := f.mustRun()
 	cfg := f.config()
-	if len(cfg.Checks) != 1 || cfg.Checks[0].Name != "first" || cfg.Checks[0].Run != "true" {
+	if len(cfg.Checks) != 1 || cfg.Checks[0].Name != "first" || cfg.Checks[0].Run != "test -f README.md" {
 		t.Fatalf("checks: %+v", cfg.Checks)
 	}
-	if !strings.Contains(errs, "kogen: checking first: true\n") || strings.Contains(errs, "kogen: checking second:") {
+	if !strings.Contains(errs, "kogen: checking first: test -f README.md\n") || strings.Contains(errs, "kogen: checking second:") {
 		t.Fatalf("stderr: %s", errs)
+	}
+}
+
+func TestInitValidateRunsNothing(t *testing.T) {
+	for _, tc := range []struct {
+		command string
+		reject  bool
+	}{
+		{"true", true}, {"echo ok && exit 0", true}, {":", true},
+		{"echo \"tests passed\"", true}, {"printf '%s' ok; true || : | echo done\nexit 0", true},
+		{"echo 'a;b|c'", true}, {`printf "%s\n" ok`, true}, {`echo "\$(pwd)"`, true},
+		{`echo "$(pwd)"`, false}, {"test -f README.md", false},
+		{"echo hi > out.txt", false}, {"go vet ./... && echo done", false},
+		{"echo $(pwd)", false}, {"echo `pwd`", false},
+	} {
+		t.Run(tc.command, func(t *testing.T) {
+			_, problems := Validate(map[string]any{"checks": initCheckList("a", tc.command)}, InitContext{})
+			if tc.reject {
+				if len(problems) != 1 || !strings.Contains(problems[0], "a") || !strings.Contains(problems[0], "runs nothing") {
+					t.Fatalf("problems: %q", problems)
+				}
+			} else if len(problems) != 0 {
+				t.Fatalf("problems: %q", problems)
+			}
+		})
+	}
+	_, problems := Validate(map[string]any{"setup": []any{"true"}, "fix": []any{"echo ok"}}, InitContext{DetectedChecks: []project.Check{{Name: "detected", Run: "true"}}})
+	if len(problems) != 0 {
+		t.Fatalf("problems: %q", problems)
+	}
+}
+
+func TestInitCorrectsRunsNothingCheck(t *testing.T) {
+	f := initNewFx(t, true, initSubmit(map[string]any{"checks": initCheckList("a", "true")}), initNothing())
+	f.write("README.md", "notes\n")
+	f.commitAll("notes")
+	exit, out, _, err := f.run("")
+	if err != nil || exit != 0 || !strings.Contains(out, "Checks: none found") {
+		t.Fatalf("exit %d, error %v, output %q", exit, err, out)
+	}
+	if len(f.requests()) != 2 {
+		t.Fatalf("requests: %d", len(f.requests()))
+	}
+	body, _ := json.Marshal(f.requests()[1])
+	if !strings.Contains(string(body), "runs nothing") || !strings.Contains(string(body), "check a") {
+		t.Fatalf("correction: %s", body)
+	}
+	if checks := f.config().Checks; len(checks) != 0 {
+		t.Fatalf("checks: %v", checks)
 	}
 }
