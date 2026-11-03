@@ -1,0 +1,54 @@
+package main
+
+import (
+ "encoding/json"
+ "fmt"
+ "os"
+ "path/filepath"
+ "github.com/KogenAI/kogen-coordinator/project"
+ "github.com/KogenAI/kogen-executor/executor"
+ "github.com/KogenAI/kogen-executor/executor/claudecode"
+ "github.com/KogenAI/kogen-setup/setup"
+ "github.com/KogenAI/kogen-verification/verify"
+ "kogen-loop/provider"
+ "kogen-loop/sys"
+ "kogen-loop/tools"
+)
+
+// qualify uses the exact acceptance transport/runtime fixture through its pinned
+// public adapter, independently of Init's currently hardwired login gate.
+func qualify(s *sys.Session, route string) error {
+ var args map[string]any
+ if route=="claude-code" {
+  home:=s.Getenv("HOME")
+  token,ok:=provider.ClaudeCodeToken(home);if !ok{return fmt.Errorf("fixture Claude token unusable")}
+  exe,e:=os.Executable();if e!=nil{return e}
+  a:=claudecode.New(claudecode.Options{Home:home,Env:s.Env,Token:token,HookCommand:[]string{exe,claudecode.HookSubcommand}})
+  dir,e:=os.MkdirTemp(filepath.Dir(home),"adapter-");if e!=nil{return e};defer os.RemoveAll(dir)
+  schema:=json.RawMessage(`{"type":"object","properties":{"setup":{"type":"array","items":{"type":"string"}},"fix":{"type":"array","items":{"type":"string"}},"checks":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"run":{"type":"string"}},"required":["name","run"]}},"protect":{"type":"array","items":{"type":"string"}}},"required":["setup","fix","checks","protect"]}`)
+  session,e:=a.Start(s.Context(),executor.Task{Role:executor.RoleShape,Root:s.Cwd,Home:home,Dir:dir,Model:"claude-sonnet-5-5",Effort:"high",Schema:schema,Brief:executor.Brief{Stable:setup.InitInstructions(),Dynamic:"# Fixture"}},nil);if e!=nil{return e};defer session.Close()
+  result,e:=session.Round(s.Context(),executor.Input{});if e!=nil{return e}
+  if e=json.Unmarshal(result.Structured,&args);e!=nil{return e}
+ } else {
+  p,ok:=provider.Lookup(route);if !ok{return fmt.Errorf("unknown route")}
+  model:="gpt-6.1-sol";if len(p.Models)>0{model=p.Models[0]}
+  response,e:=provider.NewClient("fixture").Respond(s.Context(),s,provider.Request{Role:provider.Role{Provider:route,Model:model,Effort:"high"},Instructions:setup.InitInstructions(),Input:[]any{map[string]any{"role":"user","content":"# Fixture"}},Tools:[]any{}},nil);if e!=nil{return e}
+  calls:=tools.Calls(response.Items);if len(calls)!=1||calls[0].Name!=setup.SubmitConfigurationTool{return fmt.Errorf("fixture must deliver exactly submit_configuration")};args=calls[0].Args()
+ }
+ proposal,problems:=setup.Validate(args,setup.InitContext{});if len(problems)>0{return fmt.Errorf("invalid fixture: %v",problems)}
+ if len(proposal.Checks)!=2||proposal.Checks[0].Name!="pass"||proposal.Checks[1].Name!="fail"{return fmt.Errorf("fixture lost ordered checks: %v",proposal.Checks)}
+ return nil
+}
+func main() {
+ if len(os.Args)>1 && os.Args[1]==claudecode.HookSubcommand { os.Exit(claudecode.RunHook(os.Args[2:], os.Stdin, os.Stdout, os.Stderr)) }
+ s:=sys.NewWith(os.Environ(),os.Args[1]);s.Stdout,s.Stderr=os.Stdout,os.Stderr
+ code:=0;var err error
+ if route:=os.Getenv("INIT_QUALIFY");route!="" {err=qualify(s,route);if err!=nil{code=1}} else {
+  code,err=setup.Init(s.Context(),s,setup.InitInput{Client:provider.NewClient("fixture"),Tools:verify.Tools{Node:os.Getenv("KOGEN_NODE"),Cucumber:os.Getenv("KOGEN_CUCUMBER"),Quint:os.Getenv("KOGEN_QUINT")}})
+ }
+ message:="";if err!=nil{message=err.Error()}
+ cfg,loadErr:=project.LoadConfig(os.Args[1]);load:="";if loadErr!=nil{load=loadErr.Error()}
+ b,e:=json.Marshal(map[string]any{"exit":code,"error":message,"config":cfg,"loadError":load});if e!=nil{panic(e)}
+ if e=os.WriteFile(os.Args[2],b,0600);e!=nil{panic(e)}
+ os.Exit(code)
+}

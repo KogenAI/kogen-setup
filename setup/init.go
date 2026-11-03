@@ -195,7 +195,8 @@ func initConfigure(ctx context.Context, s *sys.Session, in InitInput, repo *git.
 	if home == "" {
 		home = s.Getenv("HOME")
 	}
-	if err := provider.RequireLogin(home, []provider.Role{{}}); err != nil {
+	route, err := initSelectRoute(s, home)
+	if err != nil {
 		return err
 	}
 	s.Progress("kogen: detecting the project's commands")
@@ -223,7 +224,7 @@ func initConfigure(ctx context.Context, s *sys.Session, in InitInput, repo *git.
 		}
 	}
 	detected := project.Detect(manifests, tracked)
-	proposed, err := initAsk(ctx, s, in, detected, tracked, sources, manifests)
+	proposed, err := initAsk(ctx, s, in, route, home, detected, tracked, sources, manifests)
 	if err != nil {
 		return err
 	}
@@ -245,7 +246,7 @@ func initConfigure(ctx context.Context, s *sys.Session, in InitInput, repo *git.
 	if res.bridge {
 		files = map[string]string{initStepsReadmePath: initStepsReadme}
 	}
-	if err := initWriteFiles(repo, root, head, project.RenderConfig(cfg), files); err != nil {
+	if err := initWriteFiles(repo, root, head, initRenderConfig(cfg, route), files); err != nil {
 		return err
 	}
 	s.Puts("Initialized Kogen in " + root)
@@ -309,8 +310,8 @@ func initNextLines(s *sys.Session, cfg *project.Config) {
 
 // ---- SET-11: one request to the shaping model ----
 
-func initAsk(ctx context.Context, s *sys.Session, in InitInput, detected project.Detected, tracked []string, sources, manifests map[string]string) (InitProposal, error) {
-	role := project.DefaultModels()["shape"]
+func initAsk(ctx context.Context, s *sys.Session, in InitInput, route initRoute, home string, detected project.Detected, tracked []string, sources, manifests map[string]string) (InitProposal, error) {
+	role := route.models()["shape"]
 	s.Progress(fmt.Sprintf("kogen: asking %s/%s about the project's commands", role.Model, role.Effort))
 	t0 := time.Now()
 
@@ -332,7 +333,25 @@ func initAsk(ctx context.Context, s *sys.Session, in InitInput, detected project
 			"\n\n# Tracked files\n\n" + tools.Cut(strings.Join(tracked, "\n")) + "\n" + source.String(),
 	}}
 	ctxInfo := InitContext{Tracked: tracked, Contents: manifests, DetectedChecks: detected.Checks}
-	proposal, usage, err := initConverse(ctx, s, in, provider.Role{Provider: role.Provider, Model: role.Model, Effort: role.Effort, BaseURL: role.BaseURL}, input, ctxInfo)
+	var proposal InitProposal
+	var usage provider.Usage
+	var err error
+	if role.External() {
+		proposal, err = initClaudeConverse(ctx, s, home, role, input, ctxInfo)
+	} else {
+		// The provider client reads credentials from the session HOME. Honor InitInput.Home
+		// for the request as well as route selection, without changing the caller's session.
+		requestSession := sys.NewWith(append(slices.Clone(s.Env), "HOME="+home), s.Cwd)
+		requestSession.Stdout, requestSession.Stderr = s.Stdout, s.Stderr
+		requestCtx, cancel := context.WithCancel(ctx)
+		stop := context.AfterFunc(s.Context(), cancel)
+		proposal, usage, err = initConverse(requestCtx, requestSession, in, provider.Role{Provider: role.Provider, Model: role.Model, Effort: role.Effort, BaseURL: role.BaseURL}, input, ctxInfo)
+		stop()
+		cancel()
+		if interrupted := s.Err(); interrupted != nil {
+			return InitProposal{}, interrupted
+		}
+	}
 	if err != nil {
 		return InitProposal{}, err
 	}

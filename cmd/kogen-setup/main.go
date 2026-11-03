@@ -10,6 +10,7 @@ import (
 
 	"github.com/KogenAI/kogen-coordinator/git"
 	"github.com/KogenAI/kogen-coordinator/project"
+	"github.com/KogenAI/kogen-executor/executor/claudecode"
 	"github.com/KogenAI/kogen-setup/setup"
 	"github.com/KogenAI/kogen-verification/verify"
 	"kogen-loop/provider"
@@ -28,6 +29,9 @@ type result struct {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == claudecode.HookSubcommand {
+		os.Exit(claudecode.RunHook(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
+	}
 	if len(os.Args) != 2 {
 		fmt.Fprintln(os.Stderr, "usage: kogen-setup <checkout>")
 		os.Exit(2)

@@ -1,6 +1,7 @@
 package contract
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/KogenAI/kogen-coordinator/project"
@@ -15,6 +16,10 @@ const (
 // bridge is the acceptance configuration of the Cucumber bridge Init adds.
 func bridge() *project.Acceptance {
 	return &project.Acceptance{Run: project.AcceptanceCommand("features/steps", project.KogenRunner), StepsDir: "features/steps"}
+}
+
+func selectedChatGPT(cfg *project.Config) string {
+	return strings.ReplaceAll(project.RenderConfig(cfg), ":\n    model:", ":\n    provider: chatgpt\n    model:")
 }
 
 // files-template and one-commit: in a repository without commits, Init writes
@@ -63,7 +68,7 @@ func TestInitWritesTheConfigurationAndTheBridgeInOneCommit(t *testing.T) {
 		"Acceptance: Cucumber bridge added in features/steps",
 		"Commit: {sha8} Add Kogen configuration",
 		nextChecks)
-	equal(t, "project.yaml", f.read(project.ConfigPath), project.RenderConfig(&project.Config{Acceptance: bridge()}))
+	equal(t, "project.yaml", f.read(project.ConfigPath), selectedChatGPT(&project.Config{Acceptance: bridge()}))
 	equal(t, ".gitignore", f.read(".gitignore"), "tmp/\n.kogen/local/\n")
 	equal(t, "steps README", f.read("features/steps/README.md"), stepsReadme)
 	equal(t, "commits", f.countN(), countN+1)
@@ -82,7 +87,7 @@ func TestInitRendersTheCommandsThatPassed(t *testing.T) {
 	f.write("package-lock.json", "{}\n")
 	f.commitAll("app")
 	out, _ := f.mustRun()
-	want := project.RenderConfig(&project.Config{
+	want := selectedChatGPT(&project.Config{
 		Setup:      []string{"npm ci --no-audit --no-fund"},
 		Checks:     []project.Check{{Name: "test", Run: "npm run test"}},
 		Acceptance: bridge(),
@@ -108,7 +113,7 @@ func TestInitWithoutABridgeWritesNoStepsReadme(t *testing.T) {
 	f.commitAll("first")
 	out, _ := f.mustRun()
 	equal(t, "steps README written", f.exists("features/steps/README.md"), false)
-	equal(t, "project.yaml", f.read(project.ConfigPath), project.RenderConfig(&project.Config{}))
+	equal(t, "project.yaml", f.read(project.ConfigPath), selectedChatGPT(&project.Config{}))
 	equalList(t, "committed", f.committed(), []string{".gitignore", project.ConfigPath})
 	if !contains(out, "\nAcceptance: not configured: ") || !contains(out, nextAcceptance+"\n") {
 		t.Fatalf("stdout %q", out)

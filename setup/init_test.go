@@ -697,7 +697,7 @@ func TestInitWithoutLoginWritesNothing(t *testing.T) {
 	f.write("notes.txt", "x")
 	f.commitAll("first")
 	e := f.wantError("provider", "login", 4)
-	if e.Detail != "not signed in; run kogen provider login chatgpt" || f.exists(".kogen") || len(f.requests()) != 0 {
+	if e.Detail != "not signed in; run kogen provider login for a supported provider" || f.exists(".kogen") || len(f.requests()) != 0 {
 		t.Fatalf("%v", e)
 	}
 	if st := f.dirtyPaths(); st != "" {

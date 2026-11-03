@@ -22,6 +22,10 @@ YAML read after Init); and `error` is null on success or the error string on
 failure. The process returns Init's exit code. Init's human-readable output and
 any error go to stderr. Existing valid configuration is reported on repeat runs.
 
+## Adopting Kogen
+
+Sign in with a supported route using `kogen provider login`, then run `kogen init`. If multiple routes are available, choose one for discovery and the initial roles. Review the selected setup, fixers, checks, acceptance runner and anything left out in `.kogen/project.yaml`; correct project-specific omissions and commit the configuration changes.
+
 ## Packages
 
 - `setup`: `Init`, the `kogen init` workflow, with the validation and merging of the model's proposal, and the setup conversation's model-facing policy: the init prompt (`setup/prompts/init.md`) and the `submit_configuration` tool definition.
