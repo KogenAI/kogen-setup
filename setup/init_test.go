@@ -1607,3 +1607,76 @@ func TestInitCorrectsPublishingCheckBeforePush(t *testing.T) {
 		t.Fatalf("push marker stat: %v", err)
 	}
 }
+
+func TestInitValidateProjectRootCommands(t *testing.T) {
+	for _, tc := range []struct {
+		kind, command, root string
+		reject              bool
+	}{
+		{"setup", "cd /work/app && make test", "/work/app", true},
+		{"fix", "rm -rf /work/app/build", "/work/app", true},
+		{"checks", "ls /work/app/src", "/work/app", true},
+		{"checks", "ls /work/app", "/work/app", true},
+		{"checks", "ls '/work/app'", "/work/app", true},
+		{"checks", "ls \"/work/app\"", "/work/app", true},
+		{"checks", "ls /work/app\t", "/work/app", true},
+		{"checks", "ls /work/app\n", "/work/app", true},
+		{"checks", "make test", "/work/app", false},
+		{"checks", "ls /work/app-other", "/work/app", false},
+		{"checks", "cd \"$PWD\" && make test", "/work/app", false},
+		{"setup", "make test", "/work/app", false},
+		{"fix", "ls /work/app-other", "/work/app", false},
+		{"checks", "ls /work/app", "", false},
+		{"checks", "ls /work/a.b/src", "/work/a.b", true},
+		{"checks", "ls /work/axb/src", "/work/a.b", false},
+		{"checks", "ls /work/app-other /work/app/src", "/work/app", true},
+	} {
+		t.Run(tc.kind+"/"+tc.command+"/"+tc.root, func(t *testing.T) {
+			args := map[string]any{tc.kind: []any{tc.command}}
+			label := tc.kind + " command"
+			if tc.kind == "checks" {
+				args[tc.kind] = initCheckList("a", tc.command)
+				label = "check a"
+			}
+			_, problems := Validate(args, InitContext{Root: tc.root})
+			if !tc.reject {
+				if len(problems) != 0 {
+					t.Fatalf("problems: %q", problems)
+				}
+				return
+			}
+			if len(problems) != 1 {
+				t.Fatalf("problems: %q", problems)
+			}
+			for _, text := range []string{label, tc.command, "names the project folder by absolute path", "relative path"} {
+				if !strings.Contains(problems[0], text) {
+					t.Fatalf("problems: %q", problems)
+				}
+			}
+		})
+	}
+}
+
+func TestInitCorrectsProjectRootCheck(t *testing.T) {
+	f := initNewFx(t, true)
+	command := "test -f " + f.repo + "/README.md"
+	f.script = []initSSE{initSubmit(map[string]any{"checks": initCheckList("a", command)}), initNothing()}
+	f.write("README.md", "notes\n")
+	f.commitAll("notes")
+	exit, out, _, err := f.run("")
+	if err != nil || exit != 0 || !strings.Contains(out, "Checks: none found") {
+		t.Fatalf("exit %d, error %v, output %q", exit, err, out)
+	}
+	if len(f.requests()) != 2 {
+		t.Fatalf("requests: %d", len(f.requests()))
+	}
+	body, _ := json.Marshal(f.requests()[1])
+	for _, text := range []string{"check a", command, "names the project folder by absolute path", "relative path"} {
+		if !strings.Contains(string(body), text) {
+			t.Fatalf("correction: %s", body)
+		}
+	}
+	if checks := f.config().Checks; len(checks) != 0 {
+		t.Fatalf("checks: %v", checks)
+	}
+}

@@ -18,6 +18,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/KogenAI/kogen-coordinator/git"
@@ -229,7 +230,7 @@ func initConfigure(ctx context.Context, s *sys.Session, in InitInput, repo *git.
 		}
 	}
 	detected := project.Detect(manifests, tracked)
-	proposed, err := initAsk(ctx, s, in, route, home, detected, tracked, sources, manifests)
+	proposed, err := initAsk(ctx, s, in, route, home, root, detected, tracked, sources, manifests)
 	if err != nil {
 		return err
 	}
@@ -324,7 +325,7 @@ func initNextLines(s *sys.Session, cfg *project.Config) {
 
 // ---- SET-11: one request to the shaping model ----
 
-func initAsk(ctx context.Context, s *sys.Session, in InitInput, route initRoute, home string, detected project.Detected, tracked []string, sources, manifests map[string]string) (InitProposal, error) {
+func initAsk(ctx context.Context, s *sys.Session, in InitInput, route initRoute, home, root string, detected project.Detected, tracked []string, sources, manifests map[string]string) (InitProposal, error) {
 	role := route.models()["shape"]
 	s.Progress(fmt.Sprintf("kogen: asking %s/%s about the project's commands", role.Model, role.Effort))
 	t0 := time.Now()
@@ -346,7 +347,7 @@ func initAsk(ctx context.Context, s *sys.Session, in InitInput, route initRoute,
 		"content": "# Detected\n\n" + initDetectedJSON(detected) +
 			"\n\n# Tracked files\n\n" + tools.Cut(strings.Join(tracked, "\n")) + "\n" + source.String(),
 	}}
-	ctxInfo := InitContext{Tracked: tracked, Contents: manifests, DetectedChecks: detected.Checks}
+	ctxInfo := InitContext{Root: root, Tracked: tracked, Contents: manifests, DetectedChecks: detected.Checks}
 	var proposal InitProposal
 	var usage provider.Usage
 	var err error
@@ -481,6 +482,7 @@ type InitProposal struct {
 // text of the manifests (mix.exs, package.json, lockfiles, go.mod, go.sum; absent paths have
 // no entry) and the checks Detect found.
 type InitContext struct {
+	Root           string
 	Tracked        []string
 	Contents       map[string]string
 	DetectedChecks []project.Check
@@ -509,6 +511,9 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 	proposed := map[string]bool{}
 	for _, c := range checks {
 		proposed[c.Name] = true
+		if initNamesRoot(c.Run, ctx.Root) {
+			problems = append(problems, fmt.Sprintf("check %s (%s) names the project folder by absolute path; use a relative path", c.Name, c.Run))
+		}
 		if initPublishesOrDeploys(c.Run) {
 			problems = append(problems, fmt.Sprintf("check %s (%s) publishes or deploys", c.Name, c.Run))
 		}
@@ -533,6 +538,9 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		}
 	}
 	for _, command := range setup {
+		if initNamesRoot(command, ctx.Root) {
+			problems = append(problems, "setup command "+command+" names the project folder by absolute path; use a relative path")
+		}
 		if initPublishesOrDeploys(command) {
 			problems = append(problems, "setup command "+command+" publishes or deploys")
 		}
@@ -541,6 +549,9 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		}
 	}
 	for _, command := range fix {
+		if initNamesRoot(command, ctx.Root) {
+			problems = append(problems, "fix command "+command+" names the project folder by absolute path; use a relative path")
+		}
 		if initPublishesOrDeploys(command) {
 			problems = append(problems, "fix command "+command+" publishes or deploys")
 		}
@@ -549,6 +560,29 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		return InitProposal{}, problems
 	}
 	return InitProposal{Setup: setup, Fix: fix, Checks: checks, Protect: protect}, nil
+}
+
+// initNamesRoot matches the literal root only at a specified trailing boundary.
+func initNamesRoot(command, root string) bool {
+	if root == "" {
+		return false
+	}
+	for offset := 0; offset <= len(command)-len(root); {
+		i := strings.Index(command[offset:], root)
+		if i < 0 {
+			return false
+		}
+		end := offset + i + len(root)
+		if end == len(command) {
+			return true
+		}
+		r, _ := utf8.DecodeRuneInString(command[end:])
+		if r == '/' || r == '\'' || r == '"' || unicode.IsSpace(r) {
+			return true
+		}
+		offset += i + 1
+	}
+	return false
 }
 
 // initPublishesOrDeploys matches the specified initial command words in each part.
