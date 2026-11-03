@@ -231,11 +231,13 @@ func initConfigure(ctx context.Context, s *sys.Session, in InitInput, repo *git.
 	if err := initCommittedCopy(s, repo, root, clone, tracked); err != nil {
 		return err
 	}
-	res, err := initVerify(ctx, s, in, repo, clone, tracked, Merge(detected, proposed), detected.Runner)
+	candidates := Merge(detected, proposed)
+	res, err := initVerify(ctx, s, in, repo, clone, tracked, candidates, detected.Runner)
 	if err != nil {
 		return err
 	}
 	os.RemoveAll(clone)
+	res.filterProtect(candidates.Protect, manifests)
 
 	cfg := &project.Config{Setup: res.setup, Fix: res.fix, Checks: res.checks, Protect: res.protect, Acceptance: res.acceptance}
 	var files map[string]string
@@ -716,6 +718,21 @@ type initResult struct {
 	leftOut             []string
 }
 
+// filterProtect rechecks proposed protection against the checks that survived verification.
+func (res *initResult) filterProtect(protect []string, manifests map[string]string) {
+	if len(res.checks) == 0 {
+		return
+	}
+	for _, p := range protect {
+		text, ok := manifests[p]
+		if initProtectProblem(p, text, ok, res.checks) != "" {
+			res.leftOut = append(res.leftOut, p)
+		} else {
+			res.protect = append(res.protect, p)
+		}
+	}
+}
+
 func initExec(s *sys.Session, tools verify.Tools, command, dir string) (sys.Result, error) {
 	env := map[string]string{}
 	for k, v := range map[string]string{"KOGEN_NODE": tools.Node, "KOGEN_QUINT": tools.Quint, "KOGEN_CUCUMBER": tools.Cucumber} {
@@ -890,9 +907,6 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 		} else {
 			res.leftOut = append(res.leftOut, fmt.Sprintf("fix-%d (%s) failed with status %d", n, cmd, r.Status))
 		}
-	}
-	if len(res.checks) > 0 {
-		res.protect = candidates.Protect
 	}
 	return res, nil
 }

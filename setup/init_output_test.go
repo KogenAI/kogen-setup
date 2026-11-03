@@ -74,3 +74,22 @@ func TestInitLeftOutOutputAndConfiguration(t *testing.T) {
 		t.Errorf("config: %+v", cfg)
 	}
 }
+
+func TestInitLeftOutIncludesNewlyIneligibleProtection(t *testing.T) {
+	parallel(t)
+	f := initNewFx(t, true, initSubmit(map[string]any{
+		"setup": []any{}, "fix": []any{},
+		"checks":  initCheckList("lint", "npm run lint", "ok", "true"),
+		"protect": []any{"package.json"},
+	}))
+	f.write("package.json", `{"scripts":{"lint":"eslint ."}}`)
+	f.commitAll("notes")
+	exit, out, stderr, err := f.run("")
+	if exit != 0 || err != nil {
+		t.Fatalf("exit %d err %v stdout %s stderr %s", exit, err, out, stderr)
+	}
+	initWantLines(t, out, "Initialized Kogen in "+f.repo, "Setup: none", "Checks: ok", "Left out: lint (npm run lint) failed with status 2; package.json", "Acceptance: Cucumber bridge added in features/steps", "Commit: {sha8} Add Kogen configuration")
+	if cfg := f.config(); len(cfg.Protect) != 0 {
+		t.Fatalf("protect: %v", cfg.Protect)
+	}
+}

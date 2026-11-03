@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1364,4 +1365,38 @@ func TestInitRestoresTrackedFilesWhenCheckReplacesTheirDirectory(t *testing.T) {
 	f.commitAll("seed")
 	out, _ := f.mustRun()
 	initWantLines(t, out, "Initialized Kogen in "+f.repo, "Setup: none", "Checks: ok", "Left out: delete (rm -rf dir; echo x > dir) changed dir/a.txt, dir/b.txt", "Acceptance: Cucumber bridge added in features/steps", "Commit: {sha8} Add Kogen configuration")
+}
+
+func TestInitResultFiltersProtectionForKeptChecks(t *testing.T) {
+	lint := project.Check{Name: "lint", Run: "npm run lint"}
+	ok := project.Check{Name: "ok", Run: "true"}
+	mix := project.Check{Name: "mix-check", Run: "mix check"}
+	protect := []string{"README.md", "package.json", "mix.exs", "docs.md"}
+	manifests := map[string]string{
+		"package.json": `{"scripts":{"lint":"eslint ."}}`,
+		"mix.exs":      `def project, do: [aliases: [check: ["test"]]]`,
+	}
+	for _, tc := range []struct {
+		name          string
+		checks        []project.Check
+		embedded      bool
+		want, omitted []string
+	}{
+		{"lint and mix kept", []project.Check{lint, mix, ok}, false, protect, nil},
+		{"only ok", []project.Check{ok}, false, []string{"README.md", "docs.md"}, []string{"package.json", "mix.exs"}},
+		{"embedded settings", []project.Check{ok}, true, []string{"README.md", "package.json", "docs.md"}, []string{"mix.exs"}},
+		{"none", nil, false, nil, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			contents := maps.Clone(manifests)
+			if tc.embedded {
+				contents["package.json"] = `{"scripts":{"lint":"eslint ."},"eslintConfig":{}}`
+			}
+			res := initResult{checks: tc.checks, leftOut: []string{"failed check"}}
+			res.filterProtect(protect, contents)
+			if !reflect.DeepEqual(res.protect, tc.want) || !reflect.DeepEqual(res.leftOut, append([]string{"failed check"}, tc.omitted...)) {
+				t.Fatalf("protect %v, left out %v", res.protect, res.leftOut)
+			}
+		})
+	}
 }
