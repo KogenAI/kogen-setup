@@ -392,12 +392,12 @@ func initJSONString(s string) string {
 // invalid; a second failure ends init (provider/init_invalid).
 func initConverse(ctx context.Context, s *sys.Session, in InitInput, role provider.Role, input []any, vctx InitContext) (InitProposal, provider.Usage, error) {
 	var usage provider.Usage
-	defs := agent.AsAny(agent.Defs(agent.SubmitConfigurationTool))
+	defs := agent.AsAny(InitToolDefinitions(SubmitConfigurationTool))
 	// The setup conversation has no records of its own; its cache identity lives as long as it.
 	cacheID := newCacheID()
 	for attempt := 1; ; attempt++ {
 		resp, err := in.Client.Respond(ctx, s, conversationRequest(provider.Request{
-			Role: role, Instructions: agent.Prompt(agent.Init), Input: input, Tools: defs,
+			Role: role, Instructions: InitInstructions(), Input: input, Tools: defs,
 		}, cacheID), nil)
 		if err != nil {
 			return InitProposal{}, usage, err
@@ -405,7 +405,7 @@ func initConverse(ctx context.Context, s *sys.Session, in InitInput, role provid
 		usage = usage.Add(resp.Usage)
 		var call *tools.Call
 		for _, c := range tools.Calls(resp.Items) {
-			if c.Name == agent.SubmitConfigurationTool {
+			if c.Name == SubmitConfigurationTool {
 				c := c
 				call = &c
 				break

@@ -7,6 +7,7 @@ import (
 
 	"github.com/KogenAI/kogen-coordinator/project"
 	"github.com/KogenAI/kogen-executor/agent"
+	"github.com/KogenAI/kogen-setup/setup"
 )
 
 // one-request: configuring a project sends exactly one request to the shaping model: the
@@ -23,23 +24,23 @@ func TestInitAsksTheShapingModelOnceWithTheSubmitTool(t *testing.T) {
 	equal(t, "model", req[0]["model"], any(role.Model))
 	reasoning, _ := req[0]["reasoning"].(map[string]any)
 	equal(t, "effort", reasoning["effort"], any(role.Effort))
-	equal(t, "instructions", req[0]["instructions"], any(agent.Prompt(agent.Init)))
+	equal(t, "instructions", req[0]["instructions"], any(setup.InitInstructions()))
 
 	tools, _ := req[0]["tools"].([]any)
 	equal(t, "tools", len(tools), 1)
 	var defs []map[string]any
-	raw, _ := json.Marshal(agent.AsAny(agent.Defs(agent.SubmitConfigurationTool)))
+	raw, _ := json.Marshal(agent.AsAny(setup.InitToolDefinitions(setup.SubmitConfigurationTool)))
 	if err := json.Unmarshal(raw, &defs); err != nil {
 		t.Fatal(err)
 	}
 	got := tools[0].(map[string]any)
-	equal(t, "tool", got["name"], any(agent.SubmitConfigurationTool))
+	equal(t, "tool", got["name"], any(setup.SubmitConfigurationTool))
 	for _, k := range []string{"name", "description", "parameters"} {
 		if !reflect.DeepEqual(got[k], defs[0][k]) {
 			t.Fatalf("tool %s = %v, want %v", k, got[k], defs[0][k])
 		}
 	}
-	equal(t, "submit tool name", agent.SubmitConfigurationTool, "submit_configuration")
+	equal(t, "submit tool name", setup.SubmitConfigurationTool, "submit_configuration")
 }
 
 // one-request, retried: an answer without the call is asked once more, with the reply that

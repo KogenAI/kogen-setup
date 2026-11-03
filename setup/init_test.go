@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/KogenAI/kogen-coordinator/project"
-	"github.com/KogenAI/kogen-executor/agent"
 	"github.com/KogenAI/kogen-verification/verify"
 	"kogen-loop/provider"
 	"kogen-loop/sys"
@@ -769,7 +768,7 @@ func TestInitConfiguresAProjectWithoutChecksAndAddsTheBridge(t *testing.T) {
 		t.Fatalf("tools %v", tools)
 	}
 	// The shaping prompt leads the conversation as the developer message.
-	if text := initText(initInput(req[0])[0]); !strings.HasPrefix(text, "You configure Kogen for an existing software project.") || text != agent.Prompt(agent.Init) {
+	if text := initText(initInput(req[0])[0]); !strings.HasPrefix(text, "You configure Kogen for an existing software project.") || text != InitInstructions() {
 		t.Fatalf("policy %q", text)
 	}
 }

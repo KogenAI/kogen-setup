@@ -6,7 +6,7 @@ It is a component of [Kogen](https://github.com/KogenAI/kogen), which pins an ex
 
 ## Packages
 
-- `setup`: `Init`, the `kogen init` workflow, with the validation and merging of the model's proposal.
+- `setup`: `Init`, the `kogen init` workflow, with the validation and merging of the model's proposal, and the setup conversation's model-facing policy: the init prompt (`setup/prompts/init.md`) and the `submit_configuration` tool definition.
 - `contract`: the contract suite: what kogen uses, pinned in tests that run in `go test ./...`: the `Init` signature and `InitInput`, the exit codes, the files written, the one commit and the one model request. An intended interface change edits it together with paired consumer items. See [contract/](contract/).
 
 ## Testing
@@ -15,7 +15,7 @@ It is a component of [Kogen](https://github.com/KogenAI/kogen), which pins an ex
 go build ./... && go vet ./... && go test -race -count=1 ./...
 ```
 
-`setup/testdata/init/mix-golden.json` holds recorded Elixir verification cases. After a deliberate change to their results, regenerate it (synthetic fixtures only, never live user data or providers), then review the diff and run the checks above without the flag:
+`setup/testdata/init/mix-golden.json` holds recorded Elixir verification cases, and `setup/testdata/prompts_golden.json` and `defs_golden.json` the prompt and tool bytes the models have always received. After a deliberate change to their results, regenerate them (synthetic fixtures only, never live user data or providers), then review the diff and run the checks above without the flag:
 
 ```sh
 go test ./... -update

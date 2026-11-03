@@ -1,0 +1,55 @@
+{
+  "submit_configuration": {
+    "description": "The project's setup commands, fixers, checks and protected verification configuration; dependency-only manifests and lockfiles are ineligible.",
+    "name": "submit_configuration",
+    "parameters": {
+      "properties": {
+        "checks": {
+          "items": {
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "run": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "run"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "fix": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "protect": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "setup": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "setup",
+        "fix",
+        "checks",
+        "protect"
+      ],
+      "type": "object"
+    },
+    "strict": false,
+    "type": "function"
+  }
+}
