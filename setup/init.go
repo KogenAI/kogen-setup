@@ -245,6 +245,7 @@ func initConfigure(ctx context.Context, s *sys.Session, in InitInput, repo *git.
 		return err
 	}
 	os.RemoveAll(clone)
+	res.setup, res.checks = initSelectOverlap(res.setup, res.checks, detected.Setup, manifests, tracked)
 	res.filterProtect(candidates.Protect, manifests)
 
 	cfg := &project.Config{Setup: res.setup, Fix: res.fix, Checks: res.checks, Protect: res.protect, Acceptance: res.acceptance}
