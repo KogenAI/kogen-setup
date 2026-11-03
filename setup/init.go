@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -41,6 +42,7 @@ const (
 )
 
 var (
+	initExecTimeout      = initCommandTimeout
 	initInstructionFiles = []string{"AGENTS.md", "CLAUDE.md", "GEMINI.md", ".cursorrules", ".cursor/rules", ".github/copilot-instructions.md"}
 	initSources          = []string{"README.md", "mix.exs", "package.json", "Makefile", ".tool-versions", ".gitlab-ci.yml"}
 	initManifestNames    = []string{"mix.exs", "package.json", "mix.lock", "package-lock.json", "npm-shrinkwrap.json", "go.mod", "go.sum"}
@@ -896,7 +898,7 @@ func initExec(s *sys.Session, tools verify.Tools, command, dir string) (sys.Resu
 			env[k] = v
 		}
 	}
-	return s.Run(command, dir, sys.Options{Env: env, KillGroupOnExit: true, Timeout: initCommandTimeout})
+	return s.Run(command, dir, sys.Options{Env: env, KillGroupOnExit: true, Timeout: initExecTimeout})
 }
 
 // initRanNoTests classifies only recognized reports; positive evidence wins.
@@ -953,71 +955,103 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 	// Setup runs before every Build, so each entry must run twice on the same tree (SET-12).
 	for i, cmd := range candidates.Setup {
 		n := i + 1
-		snapshot, err := initTrackedSnapshot(clone, tracked)
+		backup, err := os.MkdirTemp(filepath.Dir(clone), "setup-before-")
 		if err != nil {
 			return res, err
 		}
-		s.Progress(fmt.Sprintf("kogen: running setup-%d: %s", n, cmd))
-		r, err := initExec(s, in.Tools, cmd, clone)
-		if err != nil {
-			return res, err
-		}
-		if failure := initCommandFailure(fmt.Sprintf("setup-%d", n), cmd, r); failure != "" {
-			initShowOutput(s, r.Output)
-			res.leftOut = append(res.leftOut, failure)
-			continue
-		}
-		first, err := initTreeState(repo, gitDir, clone)
-		if err != nil {
-			return res, err
-		}
-		firstSnapshot, err := initTrackedSnapshot(clone, tracked)
-		if err != nil {
-			return res, err
-		}
-		firstChanged := initTrackedChanged(tracked, snapshot, firstSnapshot)
-		s.Progress(fmt.Sprintf("kogen: running setup-%d again: %s", n, cmd))
-		again, err := initExec(s, in.Tools, cmd, clone)
-		if err != nil {
-			return res, err
-		}
-		second, err := initTreeState(repo, gitDir, clone)
-		if err != nil {
-			return res, err
-		}
-		secondSnapshot, err := initTrackedSnapshot(clone, tracked)
-		if err != nil {
-			return res, err
-		}
-		if err := initRestoreTracked(clone, snapshot, initTrackedChanged(tracked, snapshot, secondSnapshot)); err != nil {
-			return res, err
-		}
-		switch {
-		case again.TimedOut:
-			initShowOutput(s, again.Output)
-			res.leftOut = append(res.leftOut, initCommandFailure(fmt.Sprintf("setup-%d", n), cmd, again))
-		case again.Status != 0:
-			initShowOutput(s, again.Output)
-			res.leftOut = append(res.leftOut, fmt.Sprintf("setup-%d (%s) is not repeatable: its second run failed with status %d", n, cmd, again.Status))
-		case !initSameState(first, second):
-			initShowOutput(s, again.Output)
-			var changed []string
-			for p, v := range first {
-				if w, ok := second[p]; !ok || w != v {
-					changed = append(changed, p)
-				}
+		err = func() error {
+			defer os.RemoveAll(backup)
+			archive := filepath.Join(backup, "tree.tar")
+			if output, err := exec.Command("tar", "-cf", archive, "-C", clone, ".").CombinedOutput(); err != nil {
+				return fmt.Errorf("snapshotting setup copy: %w: %s", err, output)
 			}
-			for p := range second {
-				if _, ok := first[p]; !ok {
-					changed = append(changed, p)
-				}
+			if err := os.Mkdir(filepath.Join(backup, "tree"), 0o700); err != nil {
+				return err
 			}
-			sort.Strings(changed)
-			res.leftOut = append(res.leftOut, fmt.Sprintf("setup-%d (%s) is not repeatable: its second run changed %s", n, cmd, strings.Join(changed, ", ")))
-		case len(firstChanged) > 0:
-			res.leftOut = append(res.leftOut, fmt.Sprintf("setup-%d (%s) changed %s", n, cmd, initChangedDisplay(firstChanged)))
-		default:
-			res.setup = append(res.setup, cmd)
+			if output, err := exec.Command("tar", "-xpf", archive, "-C", filepath.Join(backup, "tree")).CombinedOutput(); err != nil {
+				return fmt.Errorf("snapshotting setup copy: %w: %s", err, output)
+			}
+			restore := func() error {
+				if err := os.RemoveAll(clone); err != nil {
+					return err
+				}
+				return os.Rename(filepath.Join(backup, "tree"), clone)
+			}
+			snapshot, err := initTrackedSnapshot(clone, tracked)
+			if err != nil {
+				return err
+			}
+			s.Progress(fmt.Sprintf("kogen: running setup-%d: %s", n, cmd))
+			r, err := initExec(s, in.Tools, cmd, clone)
+			if err != nil {
+				return err
+			}
+			if failure := initCommandFailure(fmt.Sprintf("setup-%d", n), cmd, r); failure != "" {
+				initShowOutput(s, r.Output)
+				res.leftOut = append(res.leftOut, failure)
+				return restore()
+			}
+			first, err := initTreeState(repo, gitDir, clone)
+			if err != nil {
+				return err
+			}
+			firstSnapshot, err := initTrackedSnapshot(clone, tracked)
+			if err != nil {
+				return err
+			}
+			firstChanged := initTrackedChanged(tracked, snapshot, firstSnapshot)
+			s.Progress(fmt.Sprintf("kogen: running setup-%d again: %s", n, cmd))
+			again, err := initExec(s, in.Tools, cmd, clone)
+			if err != nil {
+				return err
+			}
+			second, err := initTreeState(repo, gitDir, clone)
+			if err != nil {
+				return err
+			}
+			secondSnapshot, err := initTrackedSnapshot(clone, tracked)
+			if err != nil {
+				return err
+			}
+			kept := false
+			switch {
+			case again.TimedOut:
+				initShowOutput(s, again.Output)
+				res.leftOut = append(res.leftOut, initCommandFailure(fmt.Sprintf("setup-%d", n), cmd, again))
+			case again.Status != 0:
+				initShowOutput(s, again.Output)
+				res.leftOut = append(res.leftOut, fmt.Sprintf("setup-%d (%s) is not repeatable: its second run failed with status %d", n, cmd, again.Status))
+			case !initSameState(first, second):
+				initShowOutput(s, again.Output)
+				var changed []string
+				for p, v := range first {
+					if w, ok := second[p]; !ok || w != v {
+						changed = append(changed, p)
+					}
+				}
+				for p := range second {
+					if _, ok := first[p]; !ok {
+						changed = append(changed, p)
+					}
+				}
+				sort.Strings(changed)
+				res.leftOut = append(res.leftOut, fmt.Sprintf("setup-%d (%s) is not repeatable: its second run changed %s", n, cmd, strings.Join(changed, ", ")))
+			case len(firstChanged) > 0:
+				res.leftOut = append(res.leftOut, fmt.Sprintf("setup-%d (%s) changed %s", n, cmd, initChangedDisplay(firstChanged)))
+			default:
+				if err := initRestoreTracked(clone, snapshot, initTrackedChanged(tracked, snapshot, secondSnapshot)); err != nil {
+					return err
+				}
+				res.setup = append(res.setup, cmd)
+				kept = true
+			}
+			if !kept {
+				return restore()
+			}
+			return nil
+		}()
+		if err != nil {
+			return res, err
 		}
 	}
 
