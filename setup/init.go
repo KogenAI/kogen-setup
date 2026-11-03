@@ -724,6 +724,31 @@ func initExec(s *sys.Session, tools verify.Tools, command, dir string) (sys.Resu
 	return s.Run(command, dir, sys.Options{Env: env, KillGroupOnExit: true})
 }
 
+// initOutputTail formats captured output for left-out command diagnostics.
+func initOutputTail(output string) []string {
+	if output == "" {
+		return nil
+	}
+	lines := strings.Split(strings.TrimSuffix(output, "\n"), "\n")
+	if len(lines) > 20 {
+		lines = lines[len(lines)-20:]
+	}
+	for i, line := range lines {
+		chars := []rune(line)
+		if len(chars) > 200 {
+			chars = chars[:200]
+		}
+		lines[i] = "  | " + string(chars)
+	}
+	return lines
+}
+
+func initShowOutput(s *sys.Session, output string) {
+	for _, line := range initOutputTail(output) {
+		s.Progress(line)
+	}
+}
+
 func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Repo, clone string, candidates InitProposal, runner string) (initResult, error) {
 	gitDir, err := repo.GitDir()
 	if err != nil {
@@ -739,6 +764,7 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 			return res, err
 		}
 		if r.Status != 0 {
+			initShowOutput(s, r.Output)
 			res.leftOut = append(res.leftOut, fmt.Sprintf("setup-%d (%s) failed with status %d", n, cmd, r.Status))
 			continue
 		}
@@ -757,8 +783,10 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 		}
 		switch {
 		case again.Status != 0:
+			initShowOutput(s, again.Output)
 			res.leftOut = append(res.leftOut, fmt.Sprintf("setup-%d (%s) is not repeatable: its second run failed with status %d", n, cmd, again.Status))
 		case !initSameState(first, second):
+			initShowOutput(s, again.Output)
 			var changed []string
 			for p, v := range first {
 				if w, ok := second[p]; !ok || w != v {
@@ -795,6 +823,7 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 		if r.Status == 0 {
 			res.checks = append(res.checks, check)
 		} else {
+			initShowOutput(s, r.Output)
 			res.leftOut = append(res.leftOut, fmt.Sprintf("%s (%s) failed with status %d", check.Name, check.Run, r.Status))
 		}
 	}

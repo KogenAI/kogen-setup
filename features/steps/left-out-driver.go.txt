@@ -1,0 +1,18 @@
+package setup
+import (
+ "encoding/json"
+ "os"
+ "testing"
+)
+func TestIntentOutputCapture(t *testing.T) {
+ var args map[string]any
+ if err := json.Unmarshal([]byte(os.Getenv("INTENT_ARGS")), &args); err != nil { t.Fatal(err) }
+ f := initNewFx(t, true, initSubmit(args))
+ f.write("README.md", "x\n")
+ f.commitAll("notes")
+ exit, out, stderr, err := f.run("")
+ if err != nil { t.Fatal(err) }
+ data, err := json.Marshal(map[string]any{"exit":exit,"stdout":out,"stderr":stderr})
+ if err != nil { t.Fatal(err) }
+ if err := os.WriteFile(os.Getenv("INTENT_RESULT"), data, 0600); err != nil { t.Fatal(err) }
+}
