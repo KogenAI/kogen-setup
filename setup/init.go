@@ -1,6 +1,7 @@
 package setup
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -14,6 +15,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 	"unicode/utf8"
 
@@ -229,7 +231,7 @@ func initConfigure(ctx context.Context, s *sys.Session, in InitInput, repo *git.
 	if err := initCommittedCopy(s, repo, root, clone, tracked); err != nil {
 		return err
 	}
-	res, err := initVerify(ctx, s, in, repo, clone, Merge(detected, proposed), detected.Runner)
+	res, err := initVerify(ctx, s, in, repo, clone, tracked, Merge(detected, proposed), detected.Runner)
 	if err != nil {
 		return err
 	}
@@ -749,7 +751,7 @@ func initShowOutput(s *sys.Session, output string) {
 	}
 }
 
-func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Repo, clone string, candidates InitProposal, runner string) (initResult, error) {
+func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Repo, clone string, tracked []string, candidates InitProposal, runner string) (initResult, error) {
 	gitDir, err := repo.GitDir()
 	if err != nil {
 		return initResult{}, err
@@ -815,23 +817,122 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 	}
 
 	for _, check := range candidates.Checks {
+		before, err := initTreeState(repo, gitDir, clone)
+		if err != nil {
+			return res, err
+		}
+		snapshot, err := initTrackedSnapshot(clone, tracked)
+		if err != nil {
+			return res, err
+		}
 		s.Progress(fmt.Sprintf("kogen: checking %s: %s", check.Name, check.Run))
 		r, err := initExec(s, in.Tools, check.Run, clone)
 		if err != nil {
 			return res, err
 		}
-		if r.Status == 0 {
-			res.checks = append(res.checks, check)
-		} else {
+		if r.Status != 0 {
 			initShowOutput(s, r.Output)
 			res.leftOut = append(res.leftOut, fmt.Sprintf("%s (%s) failed with status %d", check.Name, check.Run, r.Status))
+			continue
 		}
+		after, err := initTreeState(repo, gitDir, clone)
+		if err != nil {
+			return res, err
+		}
+		afterSnapshot, err := initTrackedSnapshot(clone, tracked)
+		if err != nil {
+			return res, err
+		}
+		var changed []string
+		for _, p := range tracked {
+			old, newFile := snapshot[p], afterSnapshot[p]
+			if before[p] != after[p] || old.exists != newFile.exists || !bytes.Equal(old.data, newFile.data) || old.mode.Type() != newFile.mode.Type() {
+				changed = append(changed, p)
+			}
+		}
+		if len(changed) == 0 {
+			res.checks = append(res.checks, check)
+			continue
+		}
+		sort.Strings(changed)
+		for _, p := range changed {
+			// A check may replace a tracked file's parent directory with a file.
+			for dir := filepath.Dir(p); dir != "."; dir = filepath.Dir(dir) {
+				name := filepath.Join(clone, dir)
+				if st, err := os.Lstat(name); err == nil && !st.IsDir() {
+					if err := os.RemoveAll(name); err != nil {
+						return res, err
+					}
+				}
+			}
+			if err := snapshot[p].restore(filepath.Join(clone, p)); err != nil {
+				return res, err
+			}
+		}
+		displayed := changed
+		suffix := ""
+		if len(displayed) > 5 {
+			displayed = displayed[:5]
+			suffix = ", ..."
+		}
+		res.leftOut = append(res.leftOut, fmt.Sprintf("%s (%s) changed %s%s", check.Name, check.Run, strings.Join(displayed, ", "), suffix))
 	}
 	res.fix = candidates.Fix
 	if len(res.checks) > 0 {
 		res.protect = candidates.Protect
 	}
 	return res, nil
+}
+
+type initSavedFile struct {
+	mode   os.FileMode
+	data   []byte
+	exists bool
+}
+
+func initTrackedSnapshot(clone string, tracked []string) (map[string]initSavedFile, error) {
+	files := make(map[string]initSavedFile, len(tracked))
+	for _, p := range tracked {
+		name := filepath.Join(clone, p)
+		st, err := os.Lstat(name)
+		if os.IsNotExist(err) || errors.Is(err, syscall.ENOTDIR) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		f := initSavedFile{mode: st.Mode(), exists: true}
+		if st.Mode()&os.ModeSymlink != 0 {
+			link, err := os.Readlink(name)
+			if err != nil {
+				return nil, err
+			}
+			f.data = []byte(link)
+		} else if st.Mode().IsRegular() {
+			f.data, err = os.ReadFile(name)
+			if err != nil {
+				return nil, err
+			}
+		}
+		files[p] = f
+	}
+	return files, nil
+}
+
+func (f initSavedFile) restore(name string) error {
+	if err := os.RemoveAll(name); err != nil {
+		return err
+	}
+	if !f.exists {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(name), 0755); err != nil {
+		return err
+	}
+	if f.mode&os.ModeSymlink != 0 {
+		return os.Symlink(string(f.data), name)
+	}
+	return os.WriteFile(name, f.data, f.mode.Perm())
 }
 
 func initSameState(a, b map[string]string) bool {

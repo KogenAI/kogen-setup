@@ -1263,3 +1263,58 @@ func TestInitCommitSubjectsFollowTheRepositoryState(t *testing.T) {
 		t.Fatal(f.subject())
 	}
 }
+
+func TestInitRejectsMutatingChecksAndRestoresSetupState(t *testing.T) {
+	parallel(t)
+	f := initNewFx(t, true, initSubmit(map[string]any{
+		"setup": []any{"echo setup > a.txt"}, "fix": []any{}, "checks": []any{
+			map[string]any{"name": "fmt", "run": "echo y > a.txt"},
+			map[string]any{"name": "delete", "run": "rm b.txt"},
+			map[string]any{"name": "ok", "run": `test "$(cat a.txt)" = setup && test "$(cat b.txt)" = x`},
+			map[string]any{"name": "scratch", "run": "echo note >> scratch.log"},
+		}, "protect": []any{}}))
+	f.write("README.md", "fixture\n")
+	f.write("a.txt", "x\n")
+	f.write("b.txt", "x\n")
+	f.commitAll("seed")
+	out, _ := f.mustRun()
+	initWantLines(t, out, "Initialized Kogen in "+f.repo, "Setup: echo setup > a.txt", "Checks: ok, scratch", "Left out: fmt (echo y > a.txt) changed a.txt; delete (rm b.txt) changed b.txt", "Acceptance: Cucumber bridge added in features/steps", "Commit: {sha8} Add Kogen configuration")
+	cfg := f.config()
+	if len(cfg.Checks) != 2 || cfg.Checks[0].Name != "ok" || cfg.Checks[1].Name != "scratch" {
+		t.Fatalf("checks: %+v", cfg.Checks)
+	}
+	if f.read("a.txt") != "x\n" || f.read("b.txt") != "x\n" || f.exists("scratch.log") {
+		t.Fatal("working tree changed")
+	}
+}
+
+func TestInitMutationPathListAtFive(t *testing.T) {
+	for _, tc := range []struct{ command, paths string }{
+		{"echo y > b.txt; echo y > a.txt", "a.txt, b.txt"},
+		{"for p in e.txt d.txt c.txt b.txt a.txt; do echo y > \"$p\"; done", "a.txt, b.txt, c.txt, d.txt, e.txt"},
+	} {
+		t.Run(tc.paths, func(t *testing.T) {
+			f := initNewFx(t, true, initSubmit(map[string]any{"setup": []any{}, "fix": []any{}, "checks": []any{map[string]any{"name": "fmt", "run": tc.command}, map[string]any{"name": "ok", "run": "true"}}, "protect": []any{}}))
+			f.write("README.md", "fixture\n")
+			for _, p := range []string{"a.txt", "b.txt", "c.txt", "d.txt", "e.txt"} {
+				f.write(p, "x\n")
+			}
+			f.commitAll("seed")
+			out, _ := f.mustRun()
+			initWantLines(t, out, "Initialized Kogen in "+f.repo, "Setup: none", "Checks: ok", "Left out: fmt ("+tc.command+") changed "+tc.paths, "Acceptance: Cucumber bridge added in features/steps", "Commit: {sha8} Add Kogen configuration")
+		})
+	}
+}
+
+func TestInitRestoresTrackedFilesWhenCheckReplacesTheirDirectory(t *testing.T) {
+	f := initNewFx(t, true, initSubmit(map[string]any{"setup": []any{}, "fix": []any{}, "checks": []any{
+		map[string]any{"name": "delete", "run": "rm -rf dir; echo x > dir"},
+		map[string]any{"name": "ok", "run": `test "$(cat dir/a.txt)" = x && test "$(cat dir/b.txt)" = y`},
+	}, "protect": []any{}}))
+	f.write("README.md", "fixture\n")
+	f.write("dir/a.txt", "x\n")
+	f.write("dir/b.txt", "y\n")
+	f.commitAll("seed")
+	out, _ := f.mustRun()
+	initWantLines(t, out, "Initialized Kogen in "+f.repo, "Setup: none", "Checks: ok", "Left out: delete (rm -rf dir; echo x > dir) changed dir/a.txt, dir/b.txt", "Acceptance: Cucumber bridge added in features/steps", "Commit: {sha8} Add Kogen configuration")
+}
