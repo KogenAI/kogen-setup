@@ -46,3 +46,21 @@ func TestInitExcludesCheckThatRanNoTests(t *testing.T) {
 		t.Fatalf("checks: %v", checks)
 	}
 }
+
+func TestInitRejectsSecondRunMutationAndNoTests(t *testing.T) {
+	parallel(t)
+	mutation := "if test -e .mutation; then echo changed > README.md; else touch .mutation; fi"
+	empty := "if test -e .empty; then echo '0 tests, 0 failures'; else touch .empty; echo '1 tests, 0 failures'; fi"
+	clean := "test \"$(cat README.md)\" = original"
+	f := initNewFx(t, true, initSubmit(map[string]any{
+		"setup": []any{}, "fix": []any{}, "checks": initCheckList("mutation", mutation, "empty", empty, "clean", clean), "protect": []any{},
+	}))
+	f.write("README.md", "original\n")
+	f.commitAll("fixture")
+	out, _ := f.mustRun()
+	initWantLines(t, out, "Initialized Kogen in "+f.repo, "Setup: none", "Checks: clean", "Left out: mutation ("+mutation+") changed README.md; empty ("+empty+") ran no tests", "Acceptance: Cucumber bridge added in features/steps", "Commit: {sha8} Add Kogen configuration")
+	checks := f.config().Checks
+	if len(checks) != 1 || checks[0].Name != "clean" {
+		t.Fatalf("checks: %v", checks)
+	}
+}

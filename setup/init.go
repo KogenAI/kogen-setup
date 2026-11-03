@@ -1102,6 +1102,7 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 		return res, err
 	}
 
+checks:
 	for _, check := range candidates.Checks {
 		before, err := initTreeState(repo, gitDir, clone)
 		if err != nil {
@@ -1111,44 +1112,54 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 		if err != nil {
 			return res, err
 		}
-		s.Progress(fmt.Sprintf("kogen: checking %s: %s", check.Name, check.Run))
-		r, err := initExec(s, in.Tools, check.Run, clone)
-		if err != nil {
-			return res, err
-		}
-		if failure := initCommandFailure(check.Name, check.Run, r); failure != "" {
-			initShowOutput(s, r.Output)
-			res.leftOut = append(res.leftOut, failure)
-			continue
-		}
-		after, err := initTreeState(repo, gitDir, clone)
-		if err != nil {
-			return res, err
-		}
-		afterSnapshot, err := initTrackedSnapshot(clone, tracked)
-		if err != nil {
-			return res, err
-		}
-		var changed []string
-		for _, p := range tracked {
-			old, newFile := snapshot[p], afterSnapshot[p]
-			if before[p] != after[p] || old.exists != newFile.exists || !bytes.Equal(old.data, newFile.data) || old.mode.Type() != newFile.mode.Type() {
-				changed = append(changed, p)
+		for run := 0; run < 2; run++ {
+			if run == 0 {
+				s.Progress(fmt.Sprintf("kogen: checking %s: %s", check.Name, check.Run))
+			} else {
+				s.Progress(fmt.Sprintf("kogen: running %s again: %s", check.Name, check.Run))
 			}
-		}
-		if len(changed) == 0 {
+			r, err := initExec(s, in.Tools, check.Run, clone)
+			if err != nil {
+				return res, err
+			}
+			if failure := initCommandFailure(check.Name, check.Run, r); failure != "" {
+				initShowOutput(s, r.Output)
+				if run == 1 {
+					prefix := fmt.Sprintf("%s (%s) ", check.Name, check.Run)
+					failure = prefix + "is not repeatable: its second run " + strings.TrimPrefix(failure, prefix)
+				}
+				res.leftOut = append(res.leftOut, failure)
+				continue checks
+			}
+			after, err := initTreeState(repo, gitDir, clone)
+			if err != nil {
+				return res, err
+			}
+			afterSnapshot, err := initTrackedSnapshot(clone, tracked)
+			if err != nil {
+				return res, err
+			}
+			var changed []string
+			for _, p := range tracked {
+				old, newFile := snapshot[p], afterSnapshot[p]
+				if before[p] != after[p] || old.exists != newFile.exists || !bytes.Equal(old.data, newFile.data) || old.mode.Type() != newFile.mode.Type() {
+					changed = append(changed, p)
+				}
+			}
+			if len(changed) > 0 {
+				sort.Strings(changed)
+				if err := initRestoreTracked(clone, snapshot, changed); err != nil {
+					return res, err
+				}
+				res.leftOut = append(res.leftOut, fmt.Sprintf("%s (%s) changed %s", check.Name, check.Run, initChangedDisplay(changed)))
+				continue checks
+			}
 			if initRanNoTests(r.Output) {
 				res.leftOut = append(res.leftOut, fmt.Sprintf("%s (%s) ran no tests", check.Name, check.Run))
-				continue
+				continue checks
 			}
-			res.checks = append(res.checks, check)
-			continue
 		}
-		sort.Strings(changed)
-		if err := initRestoreTracked(clone, snapshot, changed); err != nil {
-			return res, err
-		}
-		res.leftOut = append(res.leftOut, fmt.Sprintf("%s (%s) changed %s", check.Name, check.Run, initChangedDisplay(changed)))
+		res.checks = append(res.checks, check)
 	}
 	// Fixers run last, once each, so they cannot change which checks are kept.
 	for i, cmd := range candidates.Fix {
