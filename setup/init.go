@@ -31,6 +31,7 @@ import (
 // ---- Init: `kogen init` (SET-1..5, SET-10..13) ----
 
 const (
+	initCommandTimeout  = 10 * time.Minute
 	initIgnore          = ".kogen/local/"
 	initStepsReadmePath = "features/steps/README.md"
 	initStepsReadme     = "Cucumber step definitions for Kogen acceptance scenarios.\n"
@@ -740,7 +741,22 @@ func initExec(s *sys.Session, tools verify.Tools, command, dir string) (sys.Resu
 			env[k] = v
 		}
 	}
-	return s.Run(command, dir, sys.Options{Env: env, KillGroupOnExit: true})
+	return s.Run(command, dir, sys.Options{Env: env, KillGroupOnExit: true, Timeout: initCommandTimeout})
+}
+
+// initCommandFailure describes an unsuccessful verification command.
+func initCommandFailure(name, command string, r sys.Result) string {
+	if r.TimedOut {
+		limit := initCommandTimeout.String()
+		if initCommandTimeout%time.Minute == 0 {
+			limit = strings.TrimSuffix(limit, "0s")
+		}
+		return fmt.Sprintf("%s (%s) timed out after %s", name, command, limit)
+	}
+	if r.Status != 0 {
+		return fmt.Sprintf("%s (%s) failed with status %d", name, command, r.Status)
+	}
+	return ""
 }
 
 // initOutputTail formats captured output for left-out command diagnostics.
@@ -782,9 +798,9 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 		if err != nil {
 			return res, err
 		}
-		if r.Status != 0 {
+		if failure := initCommandFailure(fmt.Sprintf("setup-%d", n), cmd, r); failure != "" {
 			initShowOutput(s, r.Output)
-			res.leftOut = append(res.leftOut, fmt.Sprintf("setup-%d (%s) failed with status %d", n, cmd, r.Status))
+			res.leftOut = append(res.leftOut, failure)
 			continue
 		}
 		first, err := initTreeState(repo, gitDir, clone)
@@ -801,6 +817,9 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 			return res, err
 		}
 		switch {
+		case again.TimedOut:
+			initShowOutput(s, again.Output)
+			res.leftOut = append(res.leftOut, initCommandFailure(fmt.Sprintf("setup-%d", n), cmd, again))
 		case again.Status != 0:
 			initShowOutput(s, again.Output)
 			res.leftOut = append(res.leftOut, fmt.Sprintf("setup-%d (%s) is not repeatable: its second run failed with status %d", n, cmd, again.Status))
@@ -847,9 +866,9 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 		if err != nil {
 			return res, err
 		}
-		if r.Status != 0 {
+		if failure := initCommandFailure(check.Name, check.Run, r); failure != "" {
 			initShowOutput(s, r.Output)
-			res.leftOut = append(res.leftOut, fmt.Sprintf("%s (%s) failed with status %d", check.Name, check.Run, r.Status))
+			res.leftOut = append(res.leftOut, failure)
 			continue
 		}
 		after, err := initTreeState(repo, gitDir, clone)
@@ -902,10 +921,13 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 		if err != nil {
 			return res, err
 		}
-		if r.Status == 0 {
-			res.fix = append(res.fix, cmd)
+		if failure := initCommandFailure(fmt.Sprintf("fix-%d", n), cmd, r); failure != "" {
+			if r.TimedOut {
+				initShowOutput(s, r.Output)
+			}
+			res.leftOut = append(res.leftOut, failure)
 		} else {
-			res.leftOut = append(res.leftOut, fmt.Sprintf("fix-%d (%s) failed with status %d", n, cmd, r.Status))
+			res.fix = append(res.fix, cmd)
 		}
 	}
 	return res, nil
