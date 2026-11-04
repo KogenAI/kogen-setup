@@ -420,7 +420,17 @@ func initAsk(ctx context.Context, s *sys.Session, in InitInput, route initRoute,
 		"content": "# Detected\n\n" + initDetectedJSON(detected) +
 			"\n\n# Tracked files\n\n" + tools.Cut(strings.Join(tracked, "\n")) + "\n" + source.String(),
 	}}
-	ctxInfo := InitContext{Root: root, Tracked: tracked, Contents: manifests, DetectedChecks: detected.Checks}
+	// The environment initExec gives every verification command.
+	env := slices.Clone(s.Env)
+	if env == nil {
+		env = []string{}
+	}
+	for _, tool := range []struct{ name, path string }{{"KOGEN_NODE", in.Tools.Node}, {"KOGEN_QUINT", in.Tools.Quint}, {"KOGEN_CUCUMBER", in.Tools.Cucumber}} {
+		if tool.path != "" {
+			env = append(env, tool.name+"="+tool.path)
+		}
+	}
+	ctxInfo := InitContext{Root: root, Tracked: tracked, Contents: manifests, DetectedChecks: detected.Checks, Env: env}
 	var proposal InitProposal
 	var usage provider.Usage
 	var err error
@@ -559,6 +569,9 @@ type InitContext struct {
 	Tracked        []string
 	Contents       map[string]string
 	DetectedChecks []project.Check
+	// Env is the environment the verification commands run in, as NAME=value entries. Nil
+	// means it is not known, and Validate then does not refuse unset variables.
+	Env []string
 }
 
 // Validate checks the arguments of a submit_configuration call (SET-11). It returns the
@@ -701,6 +714,11 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		} else if initMasksFailure(c.Run) {
 			problems = append(problems, fmt.Sprintf("check %s (%s) ignores its own failure", c.Name, c.Run))
 		}
+		if ctx.Env != nil {
+			for _, name := range initUnsetVariables(c.Run, ctx.Env) {
+				problems = append(problems, fmt.Sprintf("check %s (%s) references variable %s, which is not set in the init environment; use a literal value or a project path instead", c.Name, c.Run, name))
+			}
+		}
 	}
 	var effective []project.Check
 	for _, c := range ctx.DetectedChecks {
@@ -766,6 +784,11 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		if initPublishesOrDeploys(command) {
 			problems = append(problems, "setup command "+command+" publishes or deploys")
 		}
+		if ctx.Env != nil {
+			for _, name := range initUnsetVariables(command, ctx.Env) {
+				problems = append(problems, "setup command "+command+" references variable "+name+", which is not set in the init environment; use a literal value or a project path instead")
+			}
+		}
 	}
 	for i, command := range fix {
 		if redacted, found := initCredentialLiteral(command); found {
@@ -793,6 +816,11 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		}
 		if initPublishesOrDeploys(command) {
 			problems = append(problems, "fix command "+command+" publishes or deploys")
+		}
+		if ctx.Env != nil {
+			for _, name := range initUnsetVariables(command, ctx.Env) {
+				problems = append(problems, "fix command "+command+" references variable "+name+", which is not set in the init environment; use a literal value or a project path instead")
+			}
 		}
 	}
 	if len(problems) > 0 {
