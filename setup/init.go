@@ -734,6 +734,9 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		if initChangesRepositoryState(command) {
 			problems = append(problems, "fix command "+command+" changes the repository state")
 		}
+		if initLongRunning(command) {
+			problems = append(problems, "fix command "+command+" does not exit on its own (watch or server mode); use a command that runs once")
+		}
 		if initPublishesOrDeploys(command) {
 			problems = append(problems, "fix command "+command+" publishes or deploys")
 		}
