@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -522,6 +523,9 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		if initChangesRepositoryState(c.Run) {
 			problems = append(problems, fmt.Sprintf("check %s (%s) changes the repository state", c.Name, c.Run))
 		}
+		if initLongRunning(c.Run) {
+			problems = append(problems, fmt.Sprintf("check %s (%s) does not exit on its own (watch or server mode); use a command that runs once", c.Name, c.Run))
+		}
 		if initPublishesOrDeploys(c.Run) {
 			problems = append(problems, fmt.Sprintf("check %s (%s) publishes or deploys", c.Name, c.Run))
 		}
@@ -571,6 +575,9 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		if initChangesRepositoryState(command) {
 			problems = append(problems, "setup command "+command+" changes the repository state")
 		}
+		if initLongRunning(command) {
+			problems = append(problems, "setup command "+command+" does not exit on its own (watch or server mode); use a command that runs once")
+		}
 		if initPublishesOrDeploys(command) {
 			problems = append(problems, "setup command "+command+" publishes or deploys")
 		}
@@ -599,6 +606,58 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		return InitProposal{}, problems
 	}
 	return InitProposal{Setup: setup, Fix: fix, Checks: checks, Protect: protect}, nil
+}
+
+// initLongRunning matches literal command words without executing the proposal.
+func initLongRunning(command string) bool {
+	for _, part := range initSetupPartsRE.Split(command, -1) {
+		words := strings.Fields(part)
+		if len(words) == 0 {
+			continue
+		}
+		if words[0] == "npx" && len(words) > 1 && slices.Contains([]string{"jest", "vitest", "mocha", "tsc"}, words[1]) {
+			words = words[1:]
+		}
+		watch := slices.Contains([]string{"jest", "vitest", "mocha", "tsc"}, words[0])
+		if len(words) >= 2 && words[0] == "mix" && words[1] == "test" {
+			watch = true
+		}
+		if watch && (slices.Contains(words[1:], "--watch") || slices.Contains(words[1:], "--watchAll") || slices.Contains(words[1:], "-w")) {
+			return true
+		}
+		for _, prefix := range [][]string{{"mix", "test.watch"}, {"mix", "phx.server"}, {"npm", "start"}, {"npm", "run", "dev"}, {"npm", "run", "serve"}, {"yarn", "start"}, {"yarn", "dev"}, {"pnpm", "dev"}, {"rails", "server"}, {"rails", "s"}, {"flask", "run"}, {"python", "-m", "http.server"}, {"tail", "-f"}} {
+			if len(words) >= len(prefix) && slices.Equal(words[:len(prefix)], prefix) {
+				return true
+			}
+		}
+		compose := len(words) >= 3 && slices.Equal(words[:3], []string{"docker", "compose", "up"}) || len(words) >= 2 && slices.Equal(words[:2], []string{"docker-compose", "up"})
+		if compose && !slices.Contains(words, "-d") && !slices.Contains(words, "--detach") {
+			return true
+		}
+		if len(words) >= 2 && words[0] == "sleep" {
+			duration := words[1]
+			multiplier := 1.0
+			if len(duration) > 0 {
+				switch duration[len(duration)-1] {
+				case 's':
+					duration = duration[:len(duration)-1]
+				case 'm':
+					multiplier = 60
+					duration = duration[:len(duration)-1]
+				case 'h':
+					multiplier = 3600
+					duration = duration[:len(duration)-1]
+				case 'd':
+					multiplier = 86400
+					duration = duration[:len(duration)-1]
+				}
+			}
+			if n, err := strconv.ParseFloat(duration, 64); err == nil && n*multiplier > 60 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // initLeavesProject examines unquoted and double-quoted lexical words without executing them.
