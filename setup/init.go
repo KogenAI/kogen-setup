@@ -526,6 +526,10 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 	proposed := map[string]bool{}
 	for _, c := range checks {
 		proposed[c.Name] = true
+		if redacted, found := initCredentialLiteral(c.Run); found {
+			problems = append(problems, "check command "+redacted+" contains a credential literal; read it from the environment instead")
+			continue
+		}
 		if strings.ContainsFunc(c.Run, unicode.IsControl) {
 			problems = append(problems, fmt.Sprintf("check %s command %q contains a control character; put one command per entry", c.Name, c.Run))
 			continue
@@ -568,6 +572,10 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		}
 	}
 	for i, command := range setup {
+		if redacted, found := initCredentialLiteral(command); found {
+			problems = append(problems, "setup command "+redacted+" contains a credential literal; read it from the environment instead")
+			continue
+		}
 		if strings.ContainsFunc(command, unicode.IsControl) {
 			problems = append(problems, fmt.Sprintf("setup entry %d command %q contains a control character; put one command per entry", i+1, command))
 			continue
@@ -606,6 +614,10 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		}
 	}
 	for i, command := range fix {
+		if redacted, found := initCredentialLiteral(command); found {
+			problems = append(problems, "fix command "+redacted+" contains a credential literal; read it from the environment instead")
+			continue
+		}
 		if strings.ContainsFunc(command, unicode.IsControl) {
 			problems = append(problems, fmt.Sprintf("fix entry %d command %q contains a control character; put one command per entry", i+1, command))
 			continue
