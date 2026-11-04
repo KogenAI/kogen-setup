@@ -516,6 +516,9 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		if initNamesRoot(c.Run, ctx.Root) {
 			problems = append(problems, fmt.Sprintf("check %s (%s) names the project folder by absolute path; use a relative path", c.Name, c.Run))
 		}
+		if initLeavesProject(c.Run) {
+			problems = append(problems, fmt.Sprintf("check %s (%s) reaches outside the project folder; use a path inside the project", c.Name, c.Run))
+		}
 		if initChangesRepositoryState(c.Run) {
 			problems = append(problems, fmt.Sprintf("check %s (%s) changes the repository state", c.Name, c.Run))
 		}
@@ -562,6 +565,9 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		if initNamesRoot(command, ctx.Root) {
 			problems = append(problems, "setup command "+command+" names the project folder by absolute path; use a relative path")
 		}
+		if initLeavesProject(command) {
+			problems = append(problems, "setup command "+command+" reaches outside the project folder; use a path inside the project")
+		}
 		if initChangesRepositoryState(command) {
 			problems = append(problems, "setup command "+command+" changes the repository state")
 		}
@@ -579,6 +585,9 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		if initNamesRoot(command, ctx.Root) {
 			problems = append(problems, "fix command "+command+" names the project folder by absolute path; use a relative path")
 		}
+		if initLeavesProject(command) {
+			problems = append(problems, "fix command "+command+" reaches outside the project folder; use a path inside the project")
+		}
 		if initChangesRepositoryState(command) {
 			problems = append(problems, "fix command "+command+" changes the repository state")
 		}
@@ -590,6 +599,54 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		return InitProposal{}, problems
 	}
 	return InitProposal{Setup: setup, Fix: fix, Checks: checks, Protect: protect}, nil
+}
+
+// initLeavesProject examines unquoted and double-quoted lexical words without executing them.
+func initLeavesProject(command string) bool {
+	var word strings.Builder
+	escapes := func() bool {
+		w := word.String()
+		word.Reset()
+		clean := path.Clean(w)
+		return w == "~" || strings.HasPrefix(w, "~/") || clean == ".." || strings.HasPrefix(clean, "../")
+	}
+	single, double := false, false
+	for i := 0; i < len(command); {
+		c := command[i]
+		if single {
+			if c == '\'' {
+				single = false
+			}
+			i++
+			continue
+		}
+		if c == '\'' && !double {
+			if escapes() {
+				return true
+			}
+			single = true
+			i++
+			continue
+		}
+		if c == '"' {
+			double = !double
+			i++
+			continue
+		}
+		if c == '$' && (strings.HasPrefix(command[i:], "${HOME}") || strings.HasPrefix(command[i:], "$HOME") && (i+5 == len(command) || !(command[i+5] == '_' || command[i+5] >= 'a' && command[i+5] <= 'z' || command[i+5] >= 'A' && command[i+5] <= 'Z' || command[i+5] >= '0' && command[i+5] <= '9'))) {
+			return true
+		}
+		r, size := utf8.DecodeRuneInString(command[i:])
+		if unicode.IsSpace(r) || strings.ContainsRune(";&|<>()", r) {
+			if escapes() {
+				return true
+			}
+		} else {
+			word.WriteRune(r)
+		}
+		i += size
+	}
+	return escapes()
 }
 
 // initNamesRoot matches the literal root only at a specified trailing boundary.
