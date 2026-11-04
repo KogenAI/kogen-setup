@@ -14,6 +14,14 @@ func TestValidateCredentials(t *testing.T) {
 		{"tool --token=abc\ntool --secret def", "tool --token=***\ntool --secret ***"},
 		{"tool;tool --api-key abc", "tool;tool --api-key ***"},
 		{`tool --password "abc\" def"`, `tool --password "***"`},
+		{"tool --password=abc:def", "tool --password=***"},
+		{"NAME_TOKEN=user:pass", "NAME_TOKEN=***"},
+		{"NAME_TOKEN=user:pass tool", "NAME_TOKEN=*** tool"},
+		{"tool --password='abc:def'", "tool --password='***'"},
+		{"API_KEY=a:b:c make test", "API_KEY=*** make test"},
+		{`curl -H "Authorization: Bearer abc:def" https://api.invalid/health`, `curl -H "Authorization: Bearer ***" https://api.invalid/health`},
+		{`curl -H "Authorization: Bearer a=b" https://api.invalid/health`, `curl -H "Authorization: Bearer ***" https://api.invalid/health`},
+		{"tool --token abc:def", "tool --token ***"},
 	}
 	for _, role := range []string{"setup", "fix", "checks"} {
 		for _, tc := range cases {

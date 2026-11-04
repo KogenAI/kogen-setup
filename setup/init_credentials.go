@@ -71,8 +71,9 @@ func initCredentialLiteral(command string) (string, bool) {
 		if environmentValue.MatchString(trimmed) {
 			continue
 		}
-		// A quoted HTTP header is a single shell word.
-		if colon := strings.Index(trimmed, ":"); colon >= 0 && isName(trimmed[:colon]) {
+		// A quoted HTTP header is a single shell word. A name containing "=" is
+		// an assignment or flag whose whole value follows the "=".
+		if colon := strings.Index(trimmed, ":"); colon >= 0 && !strings.Contains(trimmed[:colon], "=") && isName(trimmed[:colon]) {
 			offset := strings.Index(text, trimmed) + colon + 1
 			for offset < len(text) && (text[offset] == ' ' || text[offset] == '\t') {
 				offset++
