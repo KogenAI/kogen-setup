@@ -1665,6 +1665,71 @@ func initShowOutput(s *sys.Session, output string) {
 	}
 }
 
+// initCheckGuard is what a check run must leave as it found it: the tree state, the
+// directories and ignored paths that are not the check's own output, and the file contents.
+type initCheckGuard struct {
+	before   map[string]string
+	snapshot map[string]initSavedFile
+	paths    []string
+	dirs     []string
+	ignored  []string
+}
+
+func initGuardCheck(repo *git.Repo, gitDir, clone string, tracked []string) (initCheckGuard, error) {
+	var g initCheckGuard
+	var err error
+	if g.before, err = initTreeState(repo, gitDir, clone); err != nil {
+		return g, err
+	}
+	if g.dirs, g.ignored, err = initCheckDirs(repo, gitDir, clone); err != nil {
+		return g, err
+	}
+	g.paths = append([]string(nil), tracked...)
+	for p := range g.before {
+		g.paths = append(g.paths, p)
+	}
+	g.snapshot, err = initTrackedSnapshot(clone, g.paths)
+	return g, err
+}
+
+// clean removes what the check created and restores the files it changed.
+func (g initCheckGuard) clean(repo *git.Repo, gitDir, clone string) error {
+	args := []string{"--git-dir=" + gitDir, "--work-tree=" + clone, "clean", "-ffdx"}
+	for _, p := range g.ignored {
+		args = append(args, "-e", "/"+strings.NewReplacer(`\`, `\\`, `*`, `\*`, `?`, `\?`, `[`, `\[`).Replace(p))
+	}
+	r, err := repo.Observing().RunEnv([]string{"GIT_OPTIONAL_LOCKS=0"}, args...)
+	if err == nil && r.Status != 0 {
+		err = fmt.Errorf("git clean in the init copy failed (status %d): %s", r.Status, strings.TrimSpace(r.Stderr))
+	}
+	if err != nil {
+		return err
+	}
+	for _, dir := range g.dirs {
+		if err := os.MkdirAll(filepath.Join(clone, dir), 0o755); err != nil {
+			return err
+		}
+	}
+	current, err := initTrackedSnapshot(clone, g.paths)
+	if err != nil {
+		return err
+	}
+	return initRestoreTracked(clone, g.snapshot, initTrackedChanged(g.paths, g.snapshot, current))
+}
+
+// initRerunCheck runs a kept check once and leaves the copy as it found it.
+func initRerunCheck(s *sys.Session, in InitInput, repo *git.Repo, gitDir, clone string, tracked []string, check project.Check, timeout time.Duration) (r sys.Result, err error) {
+	guard, err := initGuardCheck(repo, gitDir, clone, tracked)
+	if err != nil {
+		return r, err
+	}
+	r, err = initExec(s, in.Tools, check.Run, clone, timeout)
+	if cleanErr := guard.clean(repo, gitDir, clone); err == nil {
+		err = cleanErr
+	}
+	return r, err
+}
+
 func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Repo, clone string, tracked []string, candidates InitProposal, runner string) (initResult, error) {
 	gitDir, err := repo.GitDir()
 	if err != nil {
@@ -1773,46 +1838,13 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 
 	for _, check := range candidates.Checks {
 		err := func() (resultErr error) {
-			before, err := initTreeState(repo, gitDir, clone)
+			guard, err := initGuardCheck(repo, gitDir, clone, tracked)
 			if err != nil {
 				return err
 			}
-			dirs, ignored, err := initCheckDirs(repo, gitDir, clone)
-			if err != nil {
-				return err
-			}
-			paths := append([]string(nil), tracked...)
-			for p := range before {
-				paths = append(paths, p)
-			}
-			snapshot, err := initTrackedSnapshot(clone, paths)
-			if err != nil {
-				return err
-			}
+			before, snapshot := guard.before, guard.snapshot
 			defer func() {
-				args := []string{"--git-dir=" + gitDir, "--work-tree=" + clone, "clean", "-ffdx"}
-				for _, p := range ignored {
-					args = append(args, "-e", "/"+strings.NewReplacer(`\`, `\\`, `*`, `\*`, `?`, `\?`, `[`, `\[`).Replace(p))
-				}
-				r, err := repo.Observing().RunEnv([]string{"GIT_OPTIONAL_LOCKS=0"}, args...)
-				if err == nil && r.Status != 0 {
-					err = fmt.Errorf("git clean in the init copy failed (status %d): %s", r.Status, strings.TrimSpace(r.Stderr))
-				}
-				if err == nil {
-					for _, dir := range dirs {
-						if err = os.MkdirAll(filepath.Join(clone, dir), 0o755); err != nil {
-							break
-						}
-					}
-				}
-				if err == nil {
-					var current map[string]initSavedFile
-					current, err = initTrackedSnapshot(clone, paths)
-					if err == nil {
-						err = initRestoreTracked(clone, snapshot, initTrackedChanged(paths, snapshot, current))
-					}
-				}
-				if resultErr == nil {
+				if err := guard.clean(repo, gitDir, clone); resultErr == nil {
 					resultErr = err
 				}
 			}()
@@ -1873,7 +1905,9 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 		}
 	}
 	// Fixers run last, so they cannot change which checks are kept. Each runs twice on
-	// the same tree and is kept only if its second run changes nothing more.
+	// the same tree and is kept only if its second run changes nothing more, and then only
+	// if every kept check still passes on the fixed tree (rerun once, in order, stopping at
+	// the first failure). A fixer that fails any of this is undone.
 	for i, cmd := range candidates.Fix {
 		name := fmt.Sprintf("fix-%d", i+1)
 		err := func() error {
@@ -1949,6 +1983,24 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 				initShowOutput(s, again.Output)
 				res.leftOut = append(res.leftOut, failure)
 				return restore()
+			}
+			for _, check := range res.checks {
+				timeout, capped, ok := budget.limit()
+				if !ok {
+					res.leftOut = append(res.leftOut, budget.unverified(name, cmd))
+					return restore()
+				}
+				s.Progress(fmt.Sprintf("kogen: checking %s after %s: %s", check.Name, name, check.Run))
+				r, err := initRerunCheck(s, in, repo, gitDir, clone, tracked, check, timeout)
+				if err != nil {
+					return err
+				}
+				if failure := budget.failure(check.Name, check.Run, r, capped); failure != "" {
+					initShowOutput(s, r.Output)
+					failure = strings.TrimPrefix(failure, fmt.Sprintf("%s (%s) ", check.Name, check.Run))
+					res.leftOut = append(res.leftOut, fmt.Sprintf("%s (%s) breaks check %s (%s): %s", name, cmd, check.Name, check.Run, failure))
+					return restore()
+				}
 			}
 			res.fix = append(res.fix, cmd)
 			return nil

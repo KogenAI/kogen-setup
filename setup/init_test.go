@@ -940,7 +940,7 @@ func TestInitLeavesOutAFailingFixerAndKeepsAPassingOne(t *testing.T) {
 
 func TestInitRunsFixersAfterTheChecksOnTheCopy(t *testing.T) {
 	parallel(t)
-	rewrite := `echo rewritten > README.md`
+	rewrite := `echo rewritten > notes.txt`
 	again := `echo run > runs.txt && test ! -e .git && test -n "$KOGEN_NODE"`
 	f := initNewFx(t, true, initSubmit(map[string]any{
 		"setup": []any{}, "fix": []any{rewrite, again}, "checks": []any{map[string]any{"name": "same", "run": "grep -qx '# notes' README.md"}}, "protect": []any{}}))
@@ -950,7 +950,7 @@ func TestInitRunsFixersAfterTheChecksOnTheCopy(t *testing.T) {
 	initWantLines(t, out,
 		"Initialized Kogen in "+f.repo,
 		"Setup: none",
-		"Fix: echo rewritten > README.md; echo run > runs.txt && test ! -e .git && test -n \"$KOGEN_NODE\"",
+		"Fix: echo rewritten > notes.txt; echo run > runs.txt && test ! -e .git && test -n \"$KOGEN_NODE\"",
 		"Checks: same",
 		"Protect: none",
 		"Acceptance: Cucumber bridge added in features/steps",
@@ -958,7 +958,7 @@ func TestInitRunsFixersAfterTheChecksOnTheCopy(t *testing.T) {
 	if cfg := f.config(); !reflect.DeepEqual(cfg.Fix, []string{rewrite, again}) {
 		t.Fatalf("config %+v", cfg)
 	}
-	if f.read("README.md") != "# notes\n" || f.exists("runs.txt") || f.dirtyPaths() != "" {
+	if f.read("README.md") != "# notes\n" || f.exists("notes.txt") || f.exists("runs.txt") || f.dirtyPaths() != "" {
 		t.Fatalf("fixers reached the working tree: %q", f.dirtyPaths())
 	}
 }
