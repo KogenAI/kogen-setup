@@ -52,7 +52,6 @@ var (
 	initCheckNameRE      = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*\n?$`)
 	initSetupPartsRE     = regexp.MustCompile(`;|&&|\|\||\n`)
 	initCommandPartsRE   = regexp.MustCompile(`;|&&|\|\||\||\n`)
-	initLocalToolsRE     = regexp.MustCompile(`(?:^|[;&]\s*)mix\s+local\.(?:hex|rebar)\b`)
 	initNpmScriptRE      = regexp.MustCompile(`\bnpm\s+(?:run\s+)?([a-zA-Z0-9:_-]+)\b`)
 	initNoTestsRE        = regexp.MustCompile(`(?m)(?:^\?[\t ]+\S+[\t ]+\[no test files\][\t ]*$|\b0 tests, 0 failures\b|\bRan 0 tests\b|\bNo tests found\b|\b0 passing\b)`)
 	initPositiveTestsRE  = regexp.MustCompile(`(?m)(?:\b0*[1-9][0-9]* tests\b|\bRan 0*[1-9][0-9]* tests\b|\b0*[1-9][0-9]* passing\b|^ok[\t ]+\S+|^PASS(?:[\t ]|$))`)
@@ -594,7 +593,14 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 			problems = append(problems, "setup command "+redacted+" contains a credential literal; read it from the environment instead")
 			continue
 		}
+		prerequisite := (!strings.ContainsFunc(command, unicode.IsControl) || strings.Contains(command, "\n")) && initMachinePrerequisite(command)
+		if prerequisite {
+			problems = append(problems, "setup command "+command+" is a one-time machine prerequisite, not recurring project setup")
+		}
 		if strings.ContainsFunc(command, unicode.IsControl) {
+			if prerequisite {
+				continue
+			}
 			problems = append(problems, fmt.Sprintf("setup entry %d command %q contains a control character; put one command per entry", i+1, command))
 			continue
 		}
@@ -627,9 +633,6 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		if initPublishesOrDeploys(command) {
 			problems = append(problems, "setup command "+command+" publishes or deploys")
 		}
-		if initLocalToolsRE.MatchString(command) {
-			problems = append(problems, "setup command "+command+" is a one-time machine prerequisite, not recurring project setup")
-		}
 	}
 	for i, command := range fix {
 		if redacted, found := initCredentialLiteral(command); found {
@@ -660,6 +663,111 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		return InitProposal{}, problems
 	}
 	return InitProposal{Setup: setup, Fix: fix, Checks: checks, Protect: protect}, nil
+}
+
+// initMachinePrerequisite recognizes literal command words without running them.
+func initMachinePrerequisite(command string) bool {
+	var parts [][]string
+	var separators []byte
+	var words []string
+	var word strings.Builder
+	var quote rune
+	escaped := false
+	flushWord := func() {
+		if word.Len() > 0 {
+			words = append(words, word.String())
+			word.Reset()
+		}
+	}
+	flushPart := func(sep byte) {
+		flushWord()
+		parts = append(parts, words)
+		words = nil
+		separators = append(separators, sep)
+	}
+	for _, r := range command {
+		if escaped {
+			word.WriteRune(r)
+			escaped = false
+			continue
+		}
+		if r == '\\' && quote != '\'' {
+			word.WriteRune(r)
+			escaped = true
+			continue
+		}
+		if quote != 0 {
+			word.WriteRune(r)
+			if r == quote {
+				quote = 0
+			}
+			continue
+		}
+		if r == '\'' || r == '"' {
+			quote = r
+			word.WriteRune(r)
+		} else if r == ';' || r == '&' || r == '|' || r == '\n' {
+			flushPart(byte(r))
+		} else if unicode.IsSpace(r) {
+			flushWord()
+		} else {
+			word.WriteRune(r)
+		}
+	}
+	flushPart(0)
+	for i, w := range parts {
+		if len(w) == 0 {
+			continue
+		}
+		if w[0] == "sudo" {
+			return true
+		}
+		if w[0] == "curl" && separators[i] == '|' && i+1 < len(parts) && len(parts[i+1]) > 0 && (parts[i+1][0] == "sh" || parts[i+1][0] == "bash") {
+			return true
+		}
+		if len(w) < 2 {
+			continue
+		}
+		switch w[0] {
+		case "mix":
+			if w[1] == "local.hex" || w[1] == "local.rebar" {
+				return true
+			}
+		case "npm":
+			if (w[1] == "install" || w[1] == "i") && (slices.Contains(w[2:], "-g") || slices.Contains(w[2:], "--global")) {
+				return true
+			}
+		case "yarn":
+			if len(w) >= 3 && w[1] == "global" && w[2] == "add" {
+				return true
+			}
+		case "pnpm":
+			if w[1] == "add" && slices.Contains(w[2:], "-g") {
+				return true
+			}
+		case "pip", "pip3":
+			if w[1] == "install" && !slices.Contains(w[2:], "-r") && !slices.Contains(w[2:], "--target") {
+				editable := false
+				for j := 2; j+1 < len(w); j++ {
+					if w[j] == "-e" && w[j+1] == "." {
+						editable = true
+					}
+				}
+				if !editable {
+					return true
+				}
+			}
+		case "gem", "cargo", "go", "brew", "apt", "apt-get":
+			if w[1] == "install" {
+				return true
+			}
+		case "apk":
+			if w[1] == "add" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // initLongRunning matches literal command words without executing the proposal.
