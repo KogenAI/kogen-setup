@@ -135,6 +135,17 @@ func initRun(ctx context.Context, s *sys.Session, in InitInput) error {
 					s.Puts("Note: setup command (" + command + ") looks like a one-time machine bootstrap")
 				}
 			}
+			for _, c := range cfg.Checks {
+				reason := ""
+				if initRunsNothing(c.Run, true) {
+					reason = "runs nothing"
+				} else if initMasksFailure(c.Run) {
+					reason = "masks its failure"
+				}
+				if reason != "" {
+					s.Puts("Note: check " + c.Name + " (" + c.Run + ") cannot fail: " + reason)
+				}
+			}
 			initNextLines(s, cfg)
 			return nil
 		}

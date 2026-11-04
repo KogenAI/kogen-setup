@@ -2014,3 +2014,51 @@ func TestInitMergeFixPreservesQuotedWhitespace(t *testing.T) {
 		t.Fatalf("fix = %q", got.Fix)
 	}
 }
+
+func TestInitAlreadyInitializedReportsVacuousChecks(t *testing.T) {
+	parallel(t)
+	type check struct{ name, run string }
+	cases := []struct {
+		name   string
+		setup  []string
+		checks []check
+		notes  []string
+	}{
+		{"prints only", nil, []check{{"test", "echo ok"}}, []string{"Note: check test (echo ok) cannot fail: runs nothing"}},
+		{"masked", nil, []check{{"test", "go test ./... || true"}}, []string{"Note: check test (go test ./... || true) cannot fail: masks its failure"}},
+		{"both", nil, []check{{"test", "echo ok || true"}}, []string{"Note: check test (echo ok || true) cannot fail: runs nothing"}},
+		{"real", nil, []check{{"test", "go test ./..."}}, nil},
+		{"in order", nil, []check{{"lint", "touch check-ran || true"}, {"unit", "go test ./..."}, {"smoke", "echo ok"}}, []string{
+			"Note: check lint (touch check-ran || true) cannot fail: masks its failure",
+			"Note: check smoke (echo ok) cannot fail: runs nothing"}},
+		{"after setup notes", []string{"mix local.hex --force"}, []check{{"test", "echo ok"}}, []string{
+			"Note: setup command (mix local.hex --force) looks like a one-time machine bootstrap",
+			"Note: check test (echo ok) cannot fail: runs nothing"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			parallel(t)
+			f := initNewFx(t, false)
+			setup, err := json.Marshal(append([]string{}, c.setup...))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var yaml strings.Builder
+			yaml.WriteString("version: 1\ncommands:\n  setup: " + string(setup) + "\n  checks:\n")
+			for _, ck := range c.checks {
+				yaml.WriteString("    - name: " + ck.name + "\n      run: '" + ck.run + "'\n")
+			}
+			f.write(".kogen/project.yaml", yaml.String())
+			f.commitAll("configured")
+			head := f.head()
+			want := []string{"Kogen is already initialized in " + f.repo}
+			want = append(want, c.notes...)
+			want = append(want, initNextAcceptance)
+			out, _ := f.mustRun()
+			initWantLines(t, out, want...)
+			if f.head() != head || f.dirtyPaths() != "" {
+				t.Fatalf("head %s dirty %q", f.head(), f.dirtyPaths())
+			}
+		})
+	}
+}
