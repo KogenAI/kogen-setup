@@ -46,7 +46,7 @@ func TestInitOutputTail(t *testing.T) {
 func TestInitLeftOutOutputAndConfiguration(t *testing.T) {
 	parallel(t)
 	f := initNewFx(t, true, initSubmit(map[string]any{
-		"setup": []any{"echo setup-out; echo setup-err >&2; exit 4", "echo retained-setup"},
+		"setup": []any{"echo setup-out; echo setup-err >&2; exit 4", "echo retained-setup && test -f README.md"},
 		"fix":   []any{}, "checks": []any{map[string]any{"name": "bad", "run": "echo check-out; echo check-err >&2; exit 7"}, map[string]any{"name": "good", "run": "test -f README.md && echo retained-check"}}, "protect": []any{},
 	}))
 	f.write("README.md", "x\n")
@@ -70,7 +70,7 @@ func TestInitLeftOutOutputAndConfiguration(t *testing.T) {
 		t.Errorf("stdout: %s", out)
 	}
 	cfg := f.config()
-	if !reflect.DeepEqual(cfg.Setup, []string{"echo retained-setup"}) || len(cfg.Checks) != 1 || cfg.Checks[0].Name != "good" || cfg.Checks[0].Run != "test -f README.md && echo retained-check" {
+	if !reflect.DeepEqual(cfg.Setup, []string{"echo retained-setup && test -f README.md"}) || len(cfg.Checks) != 1 || cfg.Checks[0].Name != "good" || cfg.Checks[0].Run != "test -f README.md && echo retained-check" {
 		t.Errorf("config: %+v", cfg)
 	}
 }

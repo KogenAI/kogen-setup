@@ -48,7 +48,7 @@ func TestInitValidateRefusesOneTimeMachineBootstrap(t *testing.T) {
 			t.Errorf("%q: problems %q", command, p)
 		}
 	}
-	for _, command := range []string{"mix deps.get", "echo mix local.hex", "mix local.hexagon"} {
+	for _, command := range []string{"mix deps.get", "echo mix local.hex > out.txt", "mix local.hexagon"} {
 		if _, p := Validate(map[string]any{"setup": []any{command}}, InitContext{}); len(p) != 0 {
 			t.Errorf("%q: problems %q", command, p)
 		}
@@ -864,14 +864,14 @@ exit 3`)
 func TestInitLeavesOutSetupThatCannotRunTwiceOnTheSameTree(t *testing.T) {
 	parallel(t)
 	f := initNewFx(t, true, initSubmit(map[string]any{
-		"setup": []any{"mkdir seeded", "echo run >> runs.txt", "true"}, "fix": []any{}, "checks": []any{}, "protect": []any{}}))
+		"setup": []any{"mkdir seeded", "echo run >> runs.txt", "test -f README.md"}, "fix": []any{}, "checks": []any{}, "protect": []any{}}))
 	f.write("README.md", "x\n")
 	f.write(".gitignore", "build/\n")
 	f.commitAll("notes")
 	out, _ := f.mustRun()
 	initWantLines(t, out,
 		"Initialized Kogen in "+f.repo,
-		"Setup: true",
+		"Setup: test -f README.md",
 		"Checks: none passed", // quirk kept: left-out setup entries count
 		"Left out: setup-1 (mkdir seeded) is not repeatable: its second run failed with status 1; setup-2 (echo run >> runs.txt) is not repeatable: its second run changed runs.txt",
 		"Acceptance: Cucumber bridge added in features/steps",
@@ -885,7 +885,7 @@ func TestInitLeavesOutSetupThatCannotRunTwiceOnTheSameTree(t *testing.T) {
 func TestInitSetupThatFailsIsLeftOut(t *testing.T) {
 	parallel(t)
 	f := initNewFx(t, true, initSubmit(map[string]any{
-		"setup": []any{"exit 4"}, "fix": []any{"echo fixer"}, "checks": []any{map[string]any{"name": "fails", "run": "exit 7"}}, "protect": []any{"README.md"}}))
+		"setup": []any{"exit 4"}, "fix": []any{"test -f README.md"}, "checks": []any{map[string]any{"name": "fails", "run": "exit 7"}}, "protect": []any{"README.md"}}))
 	f.write("README.md", "x\n")
 	f.commitAll("notes")
 	out, _ := f.mustRun()
@@ -899,7 +899,7 @@ func TestInitSetupThatFailsIsLeftOut(t *testing.T) {
 		initNextChecks)
 	cfg := f.config()
 	// Without a passing check nothing is protected; a passing fixer is kept.
-	if len(cfg.Protect) != 0 || !reflect.DeepEqual(cfg.Fix, []string{"echo fixer"}) {
+	if len(cfg.Protect) != 0 || !reflect.DeepEqual(cfg.Fix, []string{"test -f README.md"}) {
 		t.Fatalf("config %+v", cfg)
 	}
 }
@@ -907,7 +907,7 @@ func TestInitSetupThatFailsIsLeftOut(t *testing.T) {
 func TestInitLeavesOutAFailingFixerAndKeepsAPassingOne(t *testing.T) {
 	parallel(t)
 	f := initNewFx(t, true, initSubmit(map[string]any{
-		"setup": []any{}, "fix": []any{"echo boom-fix >&2; exit 5", "true"}, "checks": []any{map[string]any{"name": "ok", "run": "test -f README.md"}}, "protect": []any{}}))
+		"setup": []any{}, "fix": []any{"echo boom-fix >&2; exit 5", "test -f README.md"}, "checks": []any{map[string]any{"name": "ok", "run": "test -f README.md"}}, "protect": []any{}}))
 	f.write("README.md", "# notes\n")
 	f.commitAll("notes")
 	out, errs := f.mustRun()
@@ -918,12 +918,12 @@ func TestInitLeavesOutAFailingFixerAndKeepsAPassingOne(t *testing.T) {
 		"Left out: fix-1 (echo boom-fix >&2; exit 5) failed with status 5",
 		"Acceptance: Cucumber bridge added in features/steps",
 		"Commit: {sha8} Add Kogen configuration")
-	for _, line := range []string{"kogen: checking ok: test -f README.md", "kogen: running fix-1: echo boom-fix >&2; exit 5\n  | boom-fix\nkogen: running fix-2: true"} {
+	for _, line := range []string{"kogen: checking ok: test -f README.md", "kogen: running fix-1: echo boom-fix >&2; exit 5\n  | boom-fix\nkogen: running fix-2: test -f README.md"} {
 		if !strings.Contains(errs, line+"\n") {
 			t.Errorf("stderr lacks %q:\n%s", line, errs)
 		}
 	}
-	if cfg := f.config(); !reflect.DeepEqual(cfg.Fix, []string{"true"}) {
+	if cfg := f.config(); !reflect.DeepEqual(cfg.Fix, []string{"test -f README.md"}) {
 		t.Fatalf("config %+v", cfg)
 	}
 }
@@ -1506,8 +1506,60 @@ func TestInitValidateRunsNothing(t *testing.T) {
 		})
 	}
 	_, problems := Validate(map[string]any{"setup": []any{"true"}, "fix": []any{"echo ok"}}, InitContext{DetectedChecks: []project.Check{{Name: "detected", Run: "true"}}})
-	if len(problems) != 0 {
-		t.Fatalf("problems: %q", problems)
+	if want := []string{"setup command true runs nothing", "fix command echo ok runs nothing"}; !reflect.DeepEqual(problems, want) {
+		t.Fatalf("problems: %q, want %q", problems, want)
+	}
+}
+
+func TestInitValidateSetupFixRunsNothing(t *testing.T) {
+	for _, kind := range []string{"setup", "fix"} {
+		for _, tc := range []struct {
+			command string
+			reject  bool
+		}{
+			{"true", true}, {"echo ready", true}, {"echo done", true}, {":", true}, {"exit 0", true},
+			{"echo ok && exit 0", true}, {"printf ok; true", true}, {`echo 'a;b|c'`, true},
+			{`echo "\$(pwd)"`, true}, {"test -f x", false}, {"echo hi > out.txt", false},
+			{"go mod download && echo done", false}, {"echo $(pwd)", false}, {"echo `pwd`", false},
+			{"mix deps.get", false}, {"mkdir -p tmp", false}, {"gofmt -w .", false},
+		} {
+			t.Run(kind+"/"+tc.command, func(t *testing.T) {
+				_, problems := Validate(map[string]any{kind: []any{tc.command}}, InitContext{})
+				var want []string
+				if tc.reject {
+					want = []string{kind + " command " + tc.command + " runs nothing"}
+				}
+				if !reflect.DeepEqual(problems, want) {
+					t.Fatalf("problems: %q, want %q", problems, want)
+				}
+			})
+		}
+	}
+}
+
+func TestInitCorrectsRunsNothingSetupFix(t *testing.T) {
+	for _, kind := range []string{"setup", "fix"} {
+		t.Run(kind, func(t *testing.T) {
+			f := initNewFx(t, true, initSubmit(map[string]any{kind: []any{"true"}}), initNothing())
+			f.write("README.md", "notes\n")
+			f.commitAll("notes")
+			exit, _, _, err := f.run("")
+			if err != nil || exit != 0 {
+				t.Fatalf("exit %d, error %v", exit, err)
+			}
+			requests := f.requests()
+			if len(requests) != 2 {
+				t.Fatalf("requests: %d", len(requests))
+			}
+			body, _ := json.Marshal(requests[1])
+			if !strings.Contains(string(body), kind+" command true runs nothing") {
+				t.Fatalf("correction: %s", body)
+			}
+			cfg := f.config()
+			if len(cfg.Setup) != 0 || len(cfg.Fix) != 0 {
+				t.Fatalf("configuration: %+v", cfg)
+			}
+		})
 	}
 }
 
@@ -1696,7 +1748,7 @@ func TestInitValidateSetupSuites(t *testing.T) {
 			t.Errorf("%q: %q", separator, got)
 		}
 	}
-	for _, command := range []string{"npm ci", "mix deps.get", "mix compile", "go mod download", "cargo fetch", "echo mix test", "npm run testing", "mix testing", "python -m pytestfoo", "echo ok | go test"} {
+	for _, command := range []string{"npm ci", "mix deps.get", "mix compile", "go mod download", "cargo fetch", "echo mix test > out.txt", "npm run testing", "mix testing", "python -m pytestfoo", "echo ok | go test"} {
 		_, got := Validate(map[string]any{"setup": []any{command}}, InitContext{})
 		if len(got) != 0 {
 			t.Errorf("%q: %q", command, got)

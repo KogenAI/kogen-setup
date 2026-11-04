@@ -542,6 +542,9 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		}
 	}
 	for _, command := range setup {
+		if initRunsNothing(command) {
+			problems = append(problems, "setup command "+command+" runs nothing")
+		}
 		for _, part := range initSetupPartsRE.Split(command, -1) {
 			part = strings.TrimSpace(part)
 			words := strings.Fields(part)
@@ -564,6 +567,9 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		}
 	}
 	for _, command := range fix {
+		if initRunsNothing(command) {
+			problems = append(problems, "fix command "+command+" runs nothing")
+		}
 		if initNamesRoot(command, ctx.Root) {
 			problems = append(problems, "fix command "+command+" names the project folder by absolute path; use a relative path")
 		}
