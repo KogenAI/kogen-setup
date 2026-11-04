@@ -516,6 +516,9 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		if initNamesRoot(c.Run, ctx.Root) {
 			problems = append(problems, fmt.Sprintf("check %s (%s) names the project folder by absolute path; use a relative path", c.Name, c.Run))
 		}
+		if initChangesRepositoryState(c.Run) {
+			problems = append(problems, fmt.Sprintf("check %s (%s) changes the repository state", c.Name, c.Run))
+		}
 		if initPublishesOrDeploys(c.Run) {
 			problems = append(problems, fmt.Sprintf("check %s (%s) publishes or deploys", c.Name, c.Run))
 		}
@@ -559,6 +562,9 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		if initNamesRoot(command, ctx.Root) {
 			problems = append(problems, "setup command "+command+" names the project folder by absolute path; use a relative path")
 		}
+		if initChangesRepositoryState(command) {
+			problems = append(problems, "setup command "+command+" changes the repository state")
+		}
 		if initPublishesOrDeploys(command) {
 			problems = append(problems, "setup command "+command+" publishes or deploys")
 		}
@@ -572,6 +578,9 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		}
 		if initNamesRoot(command, ctx.Root) {
 			problems = append(problems, "fix command "+command+" names the project folder by absolute path; use a relative path")
+		}
+		if initChangesRepositoryState(command) {
+			problems = append(problems, "fix command "+command+" changes the repository state")
 		}
 		if initPublishesOrDeploys(command) {
 			problems = append(problems, "fix command "+command+" publishes or deploys")
@@ -602,6 +611,21 @@ func initNamesRoot(command, root string) bool {
 			return true
 		}
 		offset += i + 1
+	}
+	return false
+}
+
+// initChangesRepositoryState matches literal Git actions in each command part.
+func initChangesRepositoryState(command string) bool {
+	for _, part := range initCommandPartsRE.Split(command, -1) {
+		words := strings.Fields(part)
+		if len(words) < 2 || words[0] != "git" {
+			continue
+		}
+		if slices.Contains([]string{"reset", "clean", "checkout", "restore", "stash", "commit", "rebase", "merge", "cherry-pick", "tag", "branch", "am", "apply"}, words[1]) &&
+			!(words[1] == "apply" && slices.Contains(words[2:], "--check")) {
+			return true
+		}
 	}
 	return false
 }
