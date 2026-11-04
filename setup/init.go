@@ -130,6 +130,11 @@ func initRun(ctx context.Context, s *sys.Session, in InitInput) error {
 				return err
 			}
 			s.Puts("Kogen is already initialized in " + root)
+			for _, command := range cfg.Setup {
+				if initMachinePrerequisite(command) || initPublishesOrDeploys(command) {
+					s.Puts("Note: setup command (" + command + ") looks like a one-time machine bootstrap")
+				}
+			}
 			initNextLines(s, cfg)
 			return nil
 		}

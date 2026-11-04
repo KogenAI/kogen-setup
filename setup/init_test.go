@@ -1161,6 +1161,44 @@ func TestInitAlreadyInitializedPrintsWhatIsMissing(t *testing.T) {
 	initWantLines(t, out, "Kogen is already initialized in "+f.repo, initNextAcceptance, initNextChecks)
 }
 
+func TestInitAlreadyInitializedReportsOneTimeSetup(t *testing.T) {
+	parallel(t)
+	cases := []struct {
+		name  string
+		setup []string
+		notes []string
+	}{
+		{"bootstrap", []string{"mix local.hex --force", "mix deps.get"}, []string{"mix local.hex --force"}},
+		{"global install", []string{"npm install -g typescript"}, []string{"npm install -g typescript"}},
+		{"publish and deploy", []string{"go mod download", "npm publish", "terraform apply"}, []string{"npm publish", "terraform apply"}},
+		{"recurring", []string{"go mod download"}, nil},
+		{"empty", []string{}, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			parallel(t)
+			f := initNewFx(t, false)
+			cfg, err := json.Marshal(c.setup)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.write(".kogen/project.yaml", "version: 1\ncommands:\n  setup: "+string(cfg)+"\n")
+			f.commitAll("configured")
+			head := f.head()
+			want := []string{"Kogen is already initialized in " + f.repo}
+			for _, n := range c.notes {
+				want = append(want, "Note: setup command ("+n+") looks like a one-time machine bootstrap")
+			}
+			want = append(want, initNextAcceptance, initNextChecks)
+			out, _ := f.mustRun()
+			initWantLines(t, out, want...)
+			if f.head() != head || f.dirtyPaths() != "" {
+				t.Fatalf("head %s dirty %q", f.head(), f.dirtyPaths())
+			}
+		})
+	}
+}
+
 func TestInitCommitsTheConfigurationAFailedInitLeftBehind(t *testing.T) {
 	parallel(t)
 	f := initNewFx(t, false)
