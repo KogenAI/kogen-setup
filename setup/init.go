@@ -41,6 +41,10 @@ const (
 	initNextAcceptance  = "Next: set commands.acceptance in .kogen/project.yaml"
 	initNextChecks      = "Next: add the project's checks to commands.checks in .kogen/project.yaml"
 	initNpmPlaceholder  = `echo "Error: no test specified" && exit 1`
+	initMaxSetup        = 20
+	initMaxFix          = 10
+	initMaxChecks       = 20
+	initMaxProtect      = 50
 )
 
 var (
@@ -538,6 +542,27 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 			problems = append(problems, problem)
 		}
 		return out
+	}
+	for _, limit := range []struct {
+		key string
+		max int
+	}{{"setup", initMaxSetup}, {"fix", initMaxFix}, {"checks", initMaxChecks}, {"protect", initMaxProtect}} {
+		n := 0
+		switch entries := args[limit.key].(type) {
+		case []any:
+			n = len(entries)
+		case []string:
+			if limit.key != "checks" {
+				n = len(entries)
+			}
+		case []map[string]any:
+			if limit.key == "checks" {
+				n = len(entries)
+			}
+		}
+		if n > limit.max {
+			problems = append(problems, fmt.Sprintf("%s has %d entries; at most %d are allowed; keep the ones the project needs", limit.key, n, limit.max))
+		}
 	}
 	validateSyntax := func(list, command string) {
 		cmd := exec.Command("sh", "-n", "-c", command)
