@@ -1891,6 +1891,12 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 			if err != nil {
 				return err
 			}
+			var protectBefore map[string]initSavedFile
+			if len(candidates.Protect) > 0 {
+				if protectBefore, err = initTrackedSnapshot(clone, candidates.Protect); err != nil {
+					return err
+				}
+			}
 			s.Progress(fmt.Sprintf("kogen: running %s: %s", name, cmd))
 			r, err := initExec(s, in.Tools, cmd, clone, timeout)
 			if err != nil {
@@ -1900,6 +1906,17 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 				initShowOutput(s, r.Output)
 				res.leftOut = append(res.leftOut, failure)
 				return nil
+			}
+			if len(candidates.Protect) > 0 {
+				protectAfter, err := initTrackedSnapshot(clone, candidates.Protect)
+				if err != nil {
+					return err
+				}
+				if changed := initTrackedChanged(candidates.Protect, protectBefore, protectAfter); len(changed) > 0 {
+					initShowOutput(s, r.Output)
+					res.leftOut = append(res.leftOut, fmt.Sprintf("%s (%s) changed protected %s", name, cmd, strings.Join(changed, ", ")))
+					return restore()
+				}
 			}
 			first, err := initTreeState(repo, gitDir, clone)
 			if err != nil {
