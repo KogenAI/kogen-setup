@@ -35,6 +35,7 @@ import (
 
 const (
 	initCommandTimeout  = 10 * time.Minute
+	initVerifyBudget    = 30 * time.Minute
 	initIgnore          = ".kogen/local/"
 	initStepsReadmePath = "features/steps/README.md"
 	initStepsReadme     = "Cucumber step definitions for Kogen acceptance scenarios.\n"
@@ -49,6 +50,7 @@ const (
 
 var (
 	initExecTimeout      = initCommandTimeout
+	initVerifyLimit      = initVerifyBudget
 	initInstructionFiles = []string{"AGENTS.md", "CLAUDE.md", "GEMINI.md", ".cursorrules", ".cursor/rules", ".github/copilot-instructions.md"}
 	initSources          = []string{"README.md", "mix.exs", "package.json", "Makefile", ".tool-versions", ".gitlab-ci.yml"}
 	initManifestNames    = []string{"mix.exs", "package.json", "mix.lock", "package-lock.json", "npm-shrinkwrap.json", "go.mod", "go.sum"}
@@ -1507,14 +1509,26 @@ func (res *initResult) filterProtect(protect []string, manifests map[string]stri
 	}
 }
 
-func initExec(s *sys.Session, tools verify.Tools, command, dir string) (sys.Result, error) {
+func initExec(s *sys.Session, tools verify.Tools, command, dir string, timeout time.Duration) (sys.Result, error) {
 	env := map[string]string{}
 	for k, v := range map[string]string{"KOGEN_NODE": tools.Node, "KOGEN_QUINT": tools.Quint, "KOGEN_CUCUMBER": tools.Cucumber} {
 		if v != "" {
 			env[k] = v
 		}
 	}
-	return s.Run(command, dir, sys.Options{Env: env, KillGroupOnExit: true, Timeout: initExecTimeout})
+	r, err := s.Run(initShellCommand(command), dir, sys.Options{Env: env, KillGroupOnExit: true, Timeout: timeout})
+	if r.TimedOut {
+		r.Output = strings.TrimSuffix(strings.TrimSuffix(r.Output, "\n"), "Terminated")
+	}
+	return r, err
+}
+
+// initShellCommand makes the shell that runs command survive a timeout's SIGTERM until its own
+// children are reaped (the trap runs once the foreground command has ended), so a command
+// stopped by the time limit leaves no orphaned zombie that keeps its process group alive.
+// The shell reports the stopped command with a final "Terminated" line, which initExec drops.
+func initShellCommand(command string) string {
+	return "trap 'exit 143' TERM; eval '" + strings.ReplaceAll(command, "'", `'\''`) + "'"
 }
 
 // initRanNoTests classifies only recognized reports; positive evidence wins.
@@ -1525,16 +1539,50 @@ func initRanNoTests(output string) bool {
 // initCommandFailure describes an unsuccessful verification command.
 func initCommandFailure(name, command string, r sys.Result) string {
 	if r.TimedOut {
-		limit := initCommandTimeout.String()
-		if initCommandTimeout%time.Minute == 0 {
-			limit = strings.TrimSuffix(limit, "0s")
-		}
-		return fmt.Sprintf("%s (%s) timed out after %s", name, command, limit)
+		return fmt.Sprintf("%s (%s) timed out after %s", name, command, initDurationText(initCommandTimeout))
 	}
 	if r.Status != 0 {
 		return fmt.Sprintf("%s (%s) failed with status %d", name, command, r.Status)
 	}
 	return ""
+}
+
+// initDurationText formats a limit with whole minutes as 10m rather than 10m0s.
+func initDurationText(d time.Duration) string {
+	text := d.String()
+	if d%time.Minute == 0 {
+		text = strings.TrimSuffix(text, "0s")
+	}
+	return text
+}
+
+// initBudget is the total time allowed for the verification commands of one init.
+type initBudget struct{ deadline time.Time }
+
+// limit returns the timeout for the next run: the per-command limit, or the time left
+// when that is smaller (capped). ok is false when no time is left.
+func (b initBudget) limit() (timeout time.Duration, capped, ok bool) {
+	left := time.Until(b.deadline)
+	if left <= 0 {
+		return 0, false, false
+	}
+	if left < initExecTimeout {
+		return left, true, true
+	}
+	return initExecTimeout, false, true
+}
+
+// failure describes an unsuccessful run; capped says the budget, not the per-command limit, applied.
+func (b initBudget) failure(name, command string, r sys.Result, capped bool) string {
+	if r.TimedOut && capped {
+		return fmt.Sprintf("%s (%s) timed out: init time budget of %s used up", name, command, initDurationText(initVerifyLimit))
+	}
+	return initCommandFailure(name, command, r)
+}
+
+// unverified is the left-out entry for a run that could not start.
+func (b initBudget) unverified(name, command string) string {
+	return fmt.Sprintf("%s (%s) not verified: init time budget of %s used up", name, command, initDurationText(initVerifyLimit))
 }
 
 // initOutputTail formats captured output for left-out command diagnostics.
@@ -1568,6 +1616,7 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 		return initResult{}, err
 	}
 	var res initResult
+	budget := initBudget{deadline: time.Now().Add(initVerifyLimit)}
 	// Setup runs before every Build, so each entry must run twice on the same tree (SET-12).
 	for i, cmd := range candidates.Setup {
 		n := i + 1
@@ -1597,12 +1646,17 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 			if err != nil {
 				return err
 			}
+			timeout, capped, ok := budget.limit()
+			if !ok {
+				res.leftOut = append(res.leftOut, budget.unverified(fmt.Sprintf("setup-%d", n), cmd))
+				return restore()
+			}
 			s.Progress(fmt.Sprintf("kogen: running setup-%d: %s", n, cmd))
-			r, err := initExec(s, in.Tools, cmd, clone)
+			r, err := initExec(s, in.Tools, cmd, clone, timeout)
 			if err != nil {
 				return err
 			}
-			if failure := initCommandFailure(fmt.Sprintf("setup-%d", n), cmd, r); failure != "" {
+			if failure := budget.failure(fmt.Sprintf("setup-%d", n), cmd, r, capped); failure != "" {
 				initShowOutput(s, r.Output)
 				res.leftOut = append(res.leftOut, failure)
 				return restore()
@@ -1616,8 +1670,13 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 				return err
 			}
 			firstChanged := initTrackedChanged(tracked, snapshot, firstSnapshot)
+			timeout, capped, ok = budget.limit()
+			if !ok {
+				res.leftOut = append(res.leftOut, budget.unverified(fmt.Sprintf("setup-%d", n), cmd))
+				return restore()
+			}
 			s.Progress(fmt.Sprintf("kogen: running setup-%d again: %s", n, cmd))
-			again, err := initExec(s, in.Tools, cmd, clone)
+			again, err := initExec(s, in.Tools, cmd, clone, timeout)
 			if err != nil {
 				return err
 			}
@@ -1633,7 +1692,7 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 			switch {
 			case again.TimedOut:
 				initShowOutput(s, again.Output)
-				res.leftOut = append(res.leftOut, initCommandFailure(fmt.Sprintf("setup-%d", n), cmd, again))
+				res.leftOut = append(res.leftOut, budget.failure(fmt.Sprintf("setup-%d", n), cmd, again, capped))
 			case again.Status != 0:
 				initShowOutput(s, again.Output)
 				res.leftOut = append(res.leftOut, fmt.Sprintf("setup-%d (%s) is not repeatable: its second run failed with status %d", n, cmd, again.Status))
@@ -1726,16 +1785,21 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 				}
 			}()
 			for run := 0; run < 2; run++ {
+				timeout, capped, ok := budget.limit()
+				if !ok {
+					res.leftOut = append(res.leftOut, budget.unverified(check.Name, check.Run))
+					return nil
+				}
 				if run == 0 {
 					s.Progress(fmt.Sprintf("kogen: checking %s: %s", check.Name, check.Run))
 				} else {
 					s.Progress(fmt.Sprintf("kogen: running %s again: %s", check.Name, check.Run))
 				}
-				r, err := initExec(s, in.Tools, check.Run, clone)
+				r, err := initExec(s, in.Tools, check.Run, clone, timeout)
 				if err != nil {
 					return err
 				}
-				if failure := initCommandFailure(check.Name, check.Run, r); failure != "" {
+				if failure := budget.failure(check.Name, check.Run, r, capped); failure != "" {
 					initShowOutput(s, r.Output)
 					if run == 1 {
 						prefix := fmt.Sprintf("%s (%s) ", check.Name, check.Run)
@@ -1779,12 +1843,17 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 	// Fixers run last, once each, so they cannot change which checks are kept.
 	for i, cmd := range candidates.Fix {
 		n := i + 1
+		timeout, capped, ok := budget.limit()
+		if !ok {
+			res.leftOut = append(res.leftOut, budget.unverified(fmt.Sprintf("fix-%d", n), cmd))
+			continue
+		}
 		s.Progress(fmt.Sprintf("kogen: running fix-%d: %s", n, cmd))
-		r, err := initExec(s, in.Tools, cmd, clone)
+		r, err := initExec(s, in.Tools, cmd, clone, timeout)
 		if err != nil {
 			return res, err
 		}
-		if failure := initCommandFailure(fmt.Sprintf("fix-%d", n), cmd, r); failure != "" {
+		if failure := budget.failure(fmt.Sprintf("fix-%d", n), cmd, r, capped); failure != "" {
 			initShowOutput(s, r.Output)
 			res.leftOut = append(res.leftOut, failure)
 		} else {

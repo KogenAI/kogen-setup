@@ -1,0 +1,49 @@
+# Bound init verification with a total time budget
+
+Slug: k-setup-verify-total-budget
+Model: not applicable — one monotonic deadline checked before each command run; no interacting state machine or persistent state
+Acceptance:
+- .kogen/intents/k-setup-verify-total-budget/acceptance.feature
+- features/steps/k-setup-verify-total-budget__budget.js
+
+Today `initVerify` in `setup/init.go` runs every setup entry twice, every check twice and every fix once through `initExec`, each run bounded only by the per-command `initExecTimeout` (`initCommandTimeout = 10 * time.Minute`). The limits do not add up to a bound, so init can run for hours. After this change one named constant bounds the whole verification step.
+
+Required behavior:
+- Add `initVerifyBudget = 30 * time.Minute` to the existing `const` block of `setup/init.go`, spelled exactly so (gofmt alignment is fine). The acceptance steps lower this line and the existing `initCommandTimeout = 10 * time.Minute` line in a disposable copy of the source; both lines must stay in that form. Go tests may lower the budget through a package-level variable initialized from the constant, as `initExecTimeout` does for `initCommandTimeout`; messages show the budget in effect.
+- The budget is measured from the start of `initVerify`. The model conversation (`initAsk`) and the committed copy made before `initVerify` do not count.
+- Before starting any command run (a setup entry's first and second run, a check's first and second run, a fix run), `initVerify` computes the time left. If time is left, the run's `sys.Options.Timeout` is the smaller of `initExecTimeout` and the time left. Never pass a nonpositive Timeout: `sys` treats it as no limit.
+- When no time is left, the run is not started (and its `kogen: running …` / `kogen: checking …` progress line is not printed). That setup entry, check or fix is left out with `<name> (<command>) not verified: init time budget of <budget> used up`, where `<name>` is `setup-<n>`, the check's name or `fix-<n>`, as in the existing left-out entries. Every remaining setup entry, check and fix gets one such entry, so once the budget is spent no further command starts. A setup entry or check whose first run already passed but whose second run cannot start is left out the same way. The setup copy is restored as for any other left-out setup entry, and the check's existing cleanup still runs.
+- A run that times out when its limit was the time left (the time left was smaller than `initExecTimeout`) is reported as `<name> (<command>) timed out: init time budget of <budget> used up` instead of `timed out after <per-command limit>`. For a check's second run, the existing `is not repeatable: its second run ` prefix rule applies to the text after `<name> (<command>) `. The output tail is shown on stderr as today. This wording was chosen during shaping because the request says only "reported as timed out" and the per-command wording would name a limit that did not apply.
+- `<budget>` is formatted like the per-command limit in `initCommandFailure`: `time.Duration.String()` with the trailing `0s` dropped for whole minutes (`30m` by default, `2s` and `1m` at the test seam).
+- The new entries join the existing single `Left out: ` stdout line (entries joined with `; `) in verification order: setup entries, then checks, then fixes, each in proposal order. No new output lines.
+- Init then continues as today: the acceptance runner check (`verify.RunnerCheck`, not an `initExec` run, and not a setup entry, check or fix) is unchanged and not subject to the budget. Protect filtering, the configuration written from the verified commands, the commit and exit 0 also stay as today. Commands verified before the budget ran out are kept.
+
+Unchanged: the per-command limit and its `timed out after 10m` wording when it is the limit that applied; output of runs that finish inside the budget; Validate, the prompt, the tool definition and their golden files; the contract suite; `InitInput` and the exit codes.
+
+## Decisions
+- One named constant `initVerifyBudget`, default 30 minutes, measured from the start of initVerify; before each command run the limit becomes the smaller of the per-command limit and the time left; the model conversation is excluded (source: request)
+- When the budget is spent no further command starts; each remaining setup entry, check and fix is one `Left out:` entry `<name> (<command>) not verified: init time budget of 30m used up`, and init writes the configuration from what was verified (source: request)
+- A run stopped by the time left is reported as timed out, worded `<name> (<command>) timed out: init time budget of <budget> used up` (source: request)
+- The budget governs the setup, check and fix runs that initExec performs; the acceptance runner check keeps its current handling (source: request)
+
+## Source comparison
+- Addressed: Problem/Need. One constant, deadline from initVerify start, min(per-command limit, time left) before every run, not-verified entries, configuration from verified commands, conversation excluded, unchanged in-budget output. Covered by the rules above and the four scenarios.
+- Addressed: synthetic acceptance on a README-only fixture with the budget lowered to 2 s and the per-command limit to 10 s by source-line seams. `slow` (`sleep 30`) is stopped at the budget, reported as timed out and init wall stays under 6 s (scenario 1). `later-a`, `later-b` and the fix are reported not verified and never started: RUN_LOG holds only the setup runs. Setup is kept and the written configuration holds it and no left-out command. With a 60 s budget `later-a`, `later-b` and the fix are kept and `slow` is the only left-out entry, timed out after 10s (scenario 2).
+- Conflicting literal, substituted: the request's `true` setup, `later-a`/`later-b` checks and fix are refused by the current Validate (`runs nothing` for setup, fix and checks), so that proposal would never reach verification. The fixture uses `echo setup >> "$RUN_LOG"`, `echo later-a >> "$RUN_LOG"`, `echo later-b >> "$RUN_LOG"` and `echo fix >> "$RUN_LOG"` instead; each also writes the marker that proves whether it was started.
+- Settled in shaping: the request says only "reported as timed out" for a budget-capped run; the wording `timed out: init time budget of <budget> used up` avoids naming a per-command limit that did not apply. The request's owning note scopes the budget to initExec runs (setup, checks, fixes), so the acceptance runner check is unchanged.
+- Added from Need: scenario 3 (model replies after 2.5 s, same 2 s result) shows the conversation is excluded. Scenario 4 (setup `sleep 30` exhausts the budget) shows remaining setup entries are also left out.
+- Addressed: existing init tests stay green (configured go-test check). `TestInitTimeoutWithSuccessfulTermHandler` keeps its `timed out after 10m` expectation for the per-command limit; adjust only its call if `initCommandFailure`'s signature changes.
+- Omitted: nothing requested. No flag, configuration setting, prompt change or interrupted-init resume is added.
+
+## Tests
+- Stop starting commands once the budget is spent, list every remaining setup entry, check and fix as `not verified: init time budget of <budget> used up`, and write the configuration from what was verified: acceptance scenarios "A spent budget stops the slow check and leaves later commands unstarted" and "A budget spent during setup leaves the later setup entry, checks and fixes unstarted", plus a setup package test with a lowered budget (scenario)
+- Cap each run at the smaller of the per-command limit and the time left, and report a budget-capped timeout as `timed out: init time budget of <budget> used up`: acceptance scenario 1 wall time and stdout, plus the setup package test above (integration)
+- Measure the budget from the start of initVerify, excluding the model conversation: acceptance scenario "The model conversation does not use up the budget" (scenario)
+- Keep output unchanged for runs inside the budget, including the per-command `timed out after <limit>` wording: acceptance scenario "Within a 60 second budget only the per-command limit leaves the slow check out" and the existing init tests (existing)
+- Format the budget duration as 30m, 2s and 1m: focused test of the formatting used in the left-out entries (unit)
+
+## Feasibility
+- Probe on a scratch copy of HEAD with initCommandTimeout lowered to 10 s: the embedded Go harness built and ran setup.Init with the 60 s fixture. Validate accepted `echo … >> "$RUN_LOG"` setup, checks and fix and `sleep 30` as a check. Result: exit 0, checks later-a and later-b, RUN_LOG `setup\nsetup\nlater-a\nlater-a\nlater-b\nlater-b\nfix\n`, stdout `Left out: slow (sleep 30) timed out after 10s`, about 10.9 s. (probe: exit 0, 11 s)
+- Probe: the four scenarios on that copy with only the `initVerifyBudget = 30 * time.Minute` line added. Scenario 2 passed; scenarios 1, 3 and 4 failed on missing-feature assertions (later checks kept, setup-2 kept). On the unchanged tree every When step fails at the missing initVerifyBudget seam, which masks the Then assertions; the observer controls below qualify them. (probe: exit 1, 49 s)
+- The pinned kogen-loop sys documents `Timeout` nonpositive as no limit, so a spent budget must not start the run rather than pass a zero timeout.
+- evidence: {"id":"budget-observer","kind":"observer","inputs":["features/steps/k-setup-verify-total-budget__budget.js"],"observers":["features/steps/k-setup-verify-total-budget__budget.js"],"checks":[{"name":"good","command":"\"$KOGEN_NODE\" features/steps/k-setup-verify-total-budget__budget.js --control good","exit":0,"output":"accepted\n"},{"name":"bad","command":"\"$KOGEN_NODE\" features/steps/k-setup-verify-total-budget__budget.js --control bad","exit":1,"output":"rejected\n"}]}
