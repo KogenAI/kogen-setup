@@ -938,10 +938,10 @@ func TestInitLeavesOutAFailingFixerAndKeepsAPassingOne(t *testing.T) {
 	}
 }
 
-func TestInitRunsFixersOnceAfterTheChecksOnTheCopy(t *testing.T) {
+func TestInitRunsFixersAfterTheChecksOnTheCopy(t *testing.T) {
 	parallel(t)
 	rewrite := `echo rewritten > README.md`
-	again := `echo run >> runs.txt && test ! -e .git && test -n "$KOGEN_NODE"`
+	again := `echo run > runs.txt && test ! -e .git && test -n "$KOGEN_NODE"`
 	f := initNewFx(t, true, initSubmit(map[string]any{
 		"setup": []any{}, "fix": []any{rewrite, again}, "checks": []any{map[string]any{"name": "same", "run": "grep -qx '# notes' README.md"}}, "protect": []any{}}))
 	f.write("README.md", "# notes\n")
@@ -950,7 +950,7 @@ func TestInitRunsFixersOnceAfterTheChecksOnTheCopy(t *testing.T) {
 	initWantLines(t, out,
 		"Initialized Kogen in "+f.repo,
 		"Setup: none",
-		"Fix: echo rewritten > README.md; echo run >> runs.txt && test ! -e .git && test -n \"$KOGEN_NODE\"",
+		"Fix: echo rewritten > README.md; echo run > runs.txt && test ! -e .git && test -n \"$KOGEN_NODE\"",
 		"Checks: same",
 		"Protect: none",
 		"Acceptance: Cucumber bridge added in features/steps",

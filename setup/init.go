@@ -1681,21 +1681,9 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 		}
 		err = func() error {
 			defer os.RemoveAll(backup)
-			archive := filepath.Join(backup, "tree.tar")
-			if output, err := exec.Command("tar", "-cf", archive, "-C", clone, ".").CombinedOutput(); err != nil {
-				return fmt.Errorf("snapshotting setup copy: %w: %s", err, output)
-			}
-			if err := os.Mkdir(filepath.Join(backup, "tree"), 0o700); err != nil {
+			restore, err := initSnapshotCopy(clone, backup)
+			if err != nil {
 				return err
-			}
-			if output, err := exec.Command("tar", "-xpf", archive, "-C", filepath.Join(backup, "tree")).CombinedOutput(); err != nil {
-				return fmt.Errorf("snapshotting setup copy: %w: %s", err, output)
-			}
-			restore := func() error {
-				if err := os.RemoveAll(clone); err != nil {
-					return err
-				}
-				return os.Rename(filepath.Join(backup, "tree"), clone)
 			}
 			snapshot, err := initTrackedSnapshot(clone, tracked)
 			if err != nil {
@@ -1753,18 +1741,7 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 				res.leftOut = append(res.leftOut, fmt.Sprintf("setup-%d (%s) is not repeatable: its second run failed with status %d", n, cmd, again.Status))
 			case !initSameState(first, second):
 				initShowOutput(s, again.Output)
-				var changed []string
-				for p, v := range first {
-					if w, ok := second[p]; !ok || w != v {
-						changed = append(changed, p)
-					}
-				}
-				for p := range second {
-					if _, ok := first[p]; !ok {
-						changed = append(changed, p)
-					}
-				}
-				sort.Strings(changed)
+				changed := initStateDiff(first, second)
 				res.leftOut = append(res.leftOut, fmt.Sprintf("setup-%d (%s) is not repeatable: its second run changed %s", n, cmd, strings.Join(changed, ", ")))
 			case len(firstChanged) > 0:
 				res.leftOut = append(res.leftOut, fmt.Sprintf("setup-%d (%s) changed %s", n, cmd, initChangedDisplay(firstChanged)))
@@ -1895,27 +1872,113 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 			return res, err
 		}
 	}
-	// Fixers run last, once each, so they cannot change which checks are kept.
+	// Fixers run last, so they cannot change which checks are kept. Each runs twice on
+	// the same tree and is kept only if its second run changes nothing more.
 	for i, cmd := range candidates.Fix {
-		n := i + 1
-		timeout, capped, ok := budget.limit()
-		if !ok {
-			res.leftOut = append(res.leftOut, budget.unverified(fmt.Sprintf("fix-%d", n), cmd))
-			continue
-		}
-		s.Progress(fmt.Sprintf("kogen: running fix-%d: %s", n, cmd))
-		r, err := initExec(s, in.Tools, cmd, clone, timeout)
+		name := fmt.Sprintf("fix-%d", i+1)
+		err := func() error {
+			timeout, capped, ok := budget.limit()
+			if !ok {
+				res.leftOut = append(res.leftOut, budget.unverified(name, cmd))
+				return nil
+			}
+			backup, err := os.MkdirTemp(filepath.Dir(clone), "fix-before-")
+			if err != nil {
+				return err
+			}
+			defer os.RemoveAll(backup)
+			restore, err := initSnapshotCopy(clone, backup)
+			if err != nil {
+				return err
+			}
+			s.Progress(fmt.Sprintf("kogen: running %s: %s", name, cmd))
+			r, err := initExec(s, in.Tools, cmd, clone, timeout)
+			if err != nil {
+				return err
+			}
+			if failure := budget.failure(name, cmd, r, capped); failure != "" {
+				initShowOutput(s, r.Output)
+				res.leftOut = append(res.leftOut, failure)
+				return nil
+			}
+			first, err := initTreeState(repo, gitDir, clone)
+			if err != nil {
+				return err
+			}
+			timeout, capped, ok = budget.limit()
+			if !ok {
+				res.leftOut = append(res.leftOut, budget.unverified(name, cmd))
+				return restore()
+			}
+			s.Progress(fmt.Sprintf("kogen: running %s again: %s", name, cmd))
+			again, err := initExec(s, in.Tools, cmd, clone, timeout)
+			if err != nil {
+				return err
+			}
+			failure := budget.failure(name, cmd, again, capped)
+			if failure != "" {
+				prefix := fmt.Sprintf("%s (%s) ", name, cmd)
+				failure = prefix + "is not repeatable: its second run " + strings.TrimPrefix(failure, prefix)
+			} else {
+				second, err := initTreeState(repo, gitDir, clone)
+				if err != nil {
+					return err
+				}
+				if !initSameState(first, second) {
+					failure = fmt.Sprintf("%s (%s) is not repeatable: its second run changed %s", name, cmd, strings.Join(initStateDiff(first, second), ", "))
+				}
+			}
+			if failure != "" {
+				initShowOutput(s, again.Output)
+				res.leftOut = append(res.leftOut, failure)
+				return restore()
+			}
+			res.fix = append(res.fix, cmd)
+			return nil
+		}()
 		if err != nil {
 			return res, err
 		}
-		if failure := budget.failure(fmt.Sprintf("fix-%d", n), cmd, r, capped); failure != "" {
-			initShowOutput(s, r.Output)
-			res.leftOut = append(res.leftOut, failure)
-		} else {
-			res.fix = append(res.fix, cmd)
-		}
 	}
 	return res, nil
+}
+
+// initSnapshotCopy saves the whole init copy under backup and returns a function that
+// puts the copy back exactly as saved. Call it at most once.
+func initSnapshotCopy(clone, backup string) (restore func() error, err error) {
+	archive := filepath.Join(backup, "tree.tar")
+	if output, err := exec.Command("tar", "-cf", archive, "-C", clone, ".").CombinedOutput(); err != nil {
+		return nil, fmt.Errorf("snapshotting setup copy: %w: %s", err, output)
+	}
+	if err := os.Mkdir(filepath.Join(backup, "tree"), 0o700); err != nil {
+		return nil, err
+	}
+	if output, err := exec.Command("tar", "-xpf", archive, "-C", filepath.Join(backup, "tree")).CombinedOutput(); err != nil {
+		return nil, fmt.Errorf("snapshotting setup copy: %w: %s", err, output)
+	}
+	return func() error {
+		if err := os.RemoveAll(clone); err != nil {
+			return err
+		}
+		return os.Rename(filepath.Join(backup, "tree"), clone)
+	}, nil
+}
+
+// initStateDiff lists, sorted, the paths whose state differs between two tree states.
+func initStateDiff(a, b map[string]string) []string {
+	var changed []string
+	for p, v := range a {
+		if w, ok := b[p]; !ok || w != v {
+			changed = append(changed, p)
+		}
+	}
+	for p := range b {
+		if _, ok := a[p]; !ok {
+			changed = append(changed, p)
+		}
+	}
+	sort.Strings(changed)
+	return changed
 }
 
 // initCheckDirs retains empty nonignored directories without traversing ignored dependencies.
