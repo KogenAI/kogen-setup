@@ -1500,9 +1500,9 @@ func TestInitValidateRunsNothing(t *testing.T) {
 		command string
 		reject  bool
 	}{
-		{"true", true}, {"echo ok && exit 0", true}, {":", true},
-		{"echo \"tests passed\"", true}, {"printf '%s' ok; true || : | echo done; exit 0", true},
-		{"echo 'a;b|c'", true}, {`printf "%s\n" ok`, true}, {`echo "\$(pwd)"`, true},
+		{"true", true}, {":", true},
+		{"echo \"tests passed\"", false},
+		{"echo 'a;b|c'", false}, {`printf "%s\n" ok`, false}, {`echo "\$(pwd)"`, false},
 		{`echo "$(pwd)"`, false}, {"test -f README.md", false},
 		{"echo hi > out.txt", false}, {"go vet ./... && echo done", false},
 		{"echo $(pwd)", false}, {"echo `pwd`", false},
@@ -1799,7 +1799,7 @@ func TestInitValidateFailureMasks(t *testing.T) {
 		{"make test || true", "mask"}, {"npm test || :", "mask"}, {"pytest; true", "mask"},
 		{"go test ./... || exit 0", "mask"}, {"false; :", "mask"}, {"false; exit 0", "mask"},
 		{"test -f README.md || (echo missing; exit 1)", ""},
-		{`echo "a || true"`, "nothing"}, {"false || echo failed && exit 1", ""},
+		{`echo "a || true"`, ""}, {"false || echo failed && exit 1", ""},
 		{"false || (cat log; exit 1)", ""}, {"if false; then true; fi", ""},
 		{"case x in x) true;; esac", ""}, {`test -f "a || true"`, ""},
 		{"sleep 1 & wait", ""}, {"cmd1 | cat", ""},

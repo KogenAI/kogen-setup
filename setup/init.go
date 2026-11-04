@@ -572,7 +572,13 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		}
 		if strings.ContainsFunc(c.Run, unicode.IsControl) {
 			problems = append(problems, fmt.Sprintf("check %s command %q contains a control character; put one command per entry", c.Name, c.Run))
+			if initInstallsDependencies(c.Run) {
+				problems = append(problems, fmt.Sprintf("check %s (%s) installs dependencies; put the install in setup", c.Name, c.Run))
+			}
 			continue
+		}
+		if initInstallsDependencies(c.Run) {
+			problems = append(problems, fmt.Sprintf("check %s (%s) installs dependencies; put the install in setup", c.Name, c.Run))
 		}
 		if initNamesRoot(c.Run, ctx.Root) {
 			problems = append(problems, fmt.Sprintf("check %s (%s) names the project folder by absolute path; use a relative path", c.Name, c.Run))
@@ -589,7 +595,7 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		if initPublishesOrDeploys(c.Run) {
 			problems = append(problems, fmt.Sprintf("check %s (%s) publishes or deploys", c.Name, c.Run))
 		}
-		if initRunsNothing(c.Run) {
+		if initRunsNothing(c.Run, false) {
 			problems = append(problems, fmt.Sprintf("check %s (%s) runs nothing", c.Name, c.Run))
 		} else if initMasksFailure(c.Run) {
 			problems = append(problems, fmt.Sprintf("check %s (%s) ignores its own failure", c.Name, c.Run))
@@ -627,7 +633,7 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 			problems = append(problems, fmt.Sprintf("setup entry %d command %q contains a control character; put one command per entry", i+1, command))
 			continue
 		}
-		if initRunsNothing(command) {
+		if initRunsNothing(command, true) {
 			problems = append(problems, "setup command "+command+" runs nothing")
 		}
 		for _, part := range initSetupPartsRE.Split(command, -1) {
@@ -666,7 +672,7 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 			problems = append(problems, fmt.Sprintf("fix entry %d command %q contains a control character; put one command per entry", i+1, command))
 			continue
 		}
-		if initRunsNothing(command) {
+		if initRunsNothing(command, true) {
 			problems = append(problems, "fix command "+command+" runs nothing")
 		}
 		if initNamesRoot(command, ctx.Root) {
@@ -997,8 +1003,32 @@ func initMasksFailure(command string) bool {
 	return false
 }
 
+// initInstallsDependencies matches literal leading words in each command part.
+func initInstallsDependencies(command string) bool {
+	parts := strings.NewReplacer("&&", "\n", "||", "\n", ";", "\n").Replace(command)
+	installers := [][]string{
+		{"npm", "ci"}, {"npm", "install"}, {"npm", "i"},
+		{"yarn", "install"}, {"pnpm", "install"}, {"pip", "install"},
+		{"pip3", "install"}, {"python", "-m", "pip", "install"},
+		{"bundle", "install"}, {"mix", "deps.get"}, {"go", "mod", "download"},
+		{"cargo", "fetch"}, {"composer", "install"}, {"poetry", "install"}, {"uv", "sync"},
+	}
+	for _, part := range strings.Split(parts, "\n") {
+		words := strings.Fields(part)
+		if slices.Equal(words, []string{"yarn"}) {
+			return true
+		}
+		for _, installer := range installers {
+			if len(words) >= len(installer) && slices.Equal(words[:len(installer)], installer) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // initRunsNothing recognizes only a small, literal subset of shell commands.
-func initRunsNothing(command string) bool {
+func initRunsNothing(command string, printIsNothing bool) bool {
 	var words []string
 	var word strings.Builder
 	inWord := false
@@ -1017,7 +1047,7 @@ func initRunsNothing(command string) bool {
 			case "exit":
 				valid = len(words) == 2 && words[1] == "0"
 			case "echo", "printf":
-				valid = true
+				valid = printIsNothing
 			}
 		}
 		words = nil

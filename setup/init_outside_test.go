@@ -17,7 +17,7 @@ func TestValidateCommandsOutsideProject(t *testing.T) {
 		{"${HOME}/bin/lint", true}, {"cat \"$HOME/file\"", true},
 		{"sh -c 'echo ../x'", false}, {"cat '..' '~' '~/x' '$HOME' '${HOME}' 'sub/../../x'", false},
 		{"make -C sub/../app test", false}, {"cat sub/../file", false},
-		{"go test ./...", false}, {"npm ci", false},
+		{"go test ./...", false}, {"npm ls", false},
 	}
 	for _, role := range []string{"setup", "fix", "check"} {
 		for _, tc := range cases {
