@@ -514,8 +514,26 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		}
 		return out
 	}
-	setup, fix, protect := list("setup"), list("fix"), list("protect")
-	for _, p := range protect {
+	setup, fix, rawProtect := list("setup"), list("fix"), list("protect")
+	var protect []string
+	for _, input := range rawProtect {
+		if slices.Contains(strings.Split(input, "/"), "..") {
+			problems = append(problems, "protect path "+input+" leaves the project folder")
+			continue
+		}
+		p := initNormalizeProtect(input)
+		if filepath.IsAbs(p) {
+			rel, err := filepath.Rel(ctx.Root, p)
+			if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				problems = append(problems, "protect path "+input+" leaves the project folder")
+				continue
+			}
+			p = filepath.ToSlash(rel)
+		}
+		if slices.Contains(protect, p) {
+			continue
+		}
+		protect = append(protect, p)
 		if !slices.Contains(ctx.Tracked, p) {
 			problems = append(problems, "protect path "+p+" is not a tracked file")
 		}
@@ -1134,9 +1152,28 @@ func initUnion(a, b []string) []string {
 	return out
 }
 
+func initNormalizeProtect(p string) string {
+	parts := strings.Split(p, "/")
+	var kept []string
+	for _, part := range parts {
+		if part != "" && part != "." {
+			kept = append(kept, part)
+		}
+	}
+	result := strings.Join(kept, "/")
+	if strings.HasPrefix(p, "/") {
+		return "/" + result
+	}
+	if result == "" {
+		return "."
+	}
+	return result
+}
+
 func initPathUnion(a, b []string) []string {
 	out := []string{}
 	for _, s := range append(slices.Clone(a), b...) {
+		s = initNormalizeProtect(s)
 		if !slices.Contains(out, s) {
 			out = append(out, s)
 		}

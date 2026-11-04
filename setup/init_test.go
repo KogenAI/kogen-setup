@@ -1814,3 +1814,41 @@ func TestInitValidateFailureMasks(t *testing.T) {
 		}
 	}
 }
+
+func TestInitValidateProtectPathSpelling(t *testing.T) {
+	ctx := InitContext{Root: "/work/p", Tracked: []string{"mix.exs", "config/.credo.exs"}, Contents: map[string]string{"mix.exs": "def project, do: [aliases: [check: [\"test\"]]]\n"}, DetectedChecks: []project.Check{{Name: "check", Run: "mix check"}}}
+	cases := []struct {
+		input   []string
+		want    []string
+		problem string
+	}{
+		{[]string{"./mix.exs", "/work/p/config//.credo.exs/", "mix.exs", "./config/.credo.exs"}, []string{"mix.exs", "config/.credo.exs"}, ""},
+		{[]string{"../other/.credo.exs"}, nil, "protect path ../other/.credo.exs leaves the project folder"},
+		{[]string{"config/../mix.exs"}, nil, "protect path config/../mix.exs leaves the project folder"},
+		{[]string{"/etc/passwd"}, nil, "protect path /etc/passwd leaves the project folder"},
+		{[]string{"/work/peer/config/.credo.exs"}, nil, "protect path /work/peer/config/.credo.exs leaves the project folder"},
+		{[]string{"./config//missing.exs/"}, nil, "protect path config/missing.exs is not a tracked file"},
+	}
+	for _, tc := range cases {
+		got, problems := Validate(map[string]any{"protect": tc.input}, ctx)
+		if !reflect.DeepEqual(got.Protect, tc.want) || (tc.problem == "" && len(problems) != 0) || (tc.problem != "" && !reflect.DeepEqual(problems, []string{tc.problem})) {
+			t.Errorf("%q: protect %q, problems %q", tc.input, got.Protect, problems)
+		}
+	}
+}
+
+func TestInitMergeProtectPathSpelling(t *testing.T) {
+	got := Merge(project.Detected{Protect: []string{"./.credo.exs", "config//.credo.exs/"}}, InitProposal{Protect: []string{".credo.exs", "./config/.credo.exs", "./mix.exs"}})
+	want := []string{".credo.exs", "config/.credo.exs", "mix.exs"}
+	if !reflect.DeepEqual(got.Protect, want) {
+		t.Fatalf("got %q, want %q", got.Protect, want)
+	}
+}
+
+func TestInitValidateNormalizedProtectStillRequiresEligibility(t *testing.T) {
+	ctx := InitContext{Root: "/work/p", Tracked: []string{"mix.exs"}, Contents: map[string]string{"mix.exs": "def project, do: [deps: []]\n"}}
+	_, problems := Validate(map[string]any{"protect": []string{"./mix.exs"}}, ctx)
+	if len(problems) != 1 || !strings.HasPrefix(problems[0], "protect path mix.exs is not eligible:") {
+		t.Fatalf("problems: %q", problems)
+	}
+}
