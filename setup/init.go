@@ -521,6 +521,8 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		}
 		if initRunsNothing(c.Run) {
 			problems = append(problems, fmt.Sprintf("check %s (%s) runs nothing", c.Name, c.Run))
+		} else if initMasksFailure(c.Run) {
+			problems = append(problems, fmt.Sprintf("check %s (%s) ignores its own failure", c.Name, c.Run))
 		}
 	}
 	var effective []project.Check
@@ -610,6 +612,55 @@ func initPublishesOrDeploys(command string) bool {
 		deploying := slices.Contains([]string{"terraform apply", "kubectl apply", "helm install", "helm upgrade"}, action)
 		if (publishing || deploying) && !slices.Contains(words[2:], "--dry-run") && !(publishing && slices.Contains(words[2:], "-n")) {
 			return true
+		}
+	}
+	return false
+}
+
+// initMasksFailure recognizes only unquoted literal failure-masking tails.
+func initMasksFailure(command string) bool {
+	quote := byte(0)
+	for i := 0; i < len(command); i++ {
+		c := command[i]
+		if c == '\\' && quote != '\'' {
+			i++
+			continue
+		}
+		if quote != 0 {
+			if c == quote {
+				quote = 0
+			}
+			continue
+		}
+		if c == '\'' || c == '"' {
+			quote = c
+			continue
+		}
+		if c == '#' && (i == 0 || strings.ContainsRune(" \t\r\n;|&()", rune(command[i-1]))) {
+			for i < len(command) && command[i] != '\n' {
+				i++
+			}
+			continue
+		}
+		if strings.TrimSpace(command[:i]) == "" {
+			continue
+		}
+		if c == '&' {
+			if i+1 < len(command) && command[i+1] == '&' {
+				i++
+			} else if strings.TrimSpace(command[i+1:]) == "" {
+				return true
+			}
+		} else if c == ';' || (c == '|' && i+1 < len(command) && command[i+1] == '|') {
+			end := i + 1
+			if c == '|' {
+				end++
+			}
+			words := strings.Fields(command[end:])
+			if slices.Equal(words, []string{"true"}) || slices.Equal(words, []string{":"}) || slices.Equal(words, []string{"exit", "0"}) {
+				return true
+			}
+			i = end - 1
 		}
 	}
 	return false

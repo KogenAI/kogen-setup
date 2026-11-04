@@ -1729,3 +1729,39 @@ func TestInitCorrectsSetupSuiteBeforeExecution(t *testing.T) {
 		t.Fatalf("setup: %v", setup)
 	}
 }
+
+func TestInitValidateFailureMasks(t *testing.T) {
+	for _, tc := range []struct{ command, result string }{
+		{"false || true", "mask"}, {"ls missing-dir; true", "mask"}, {"sleep 1 &", "mask"},
+		{"make test || true", "mask"}, {"npm test || :", "mask"}, {"pytest; true", "mask"},
+		{"go test ./... || exit 0", "mask"}, {"false; :", "mask"}, {"false; exit 0", "mask"},
+		{"test -f README.md || (echo missing; exit 1)", ""},
+		{`echo "a || true"`, "nothing"}, {"false || echo failed && exit 1", ""},
+		{"false || (cat log; exit 1)", ""}, {"if false; then true; fi", ""},
+		{"case x in x) true;; esac", ""}, {`test -f "a || true"`, ""},
+		{"sleep 1 & wait", ""}, {"cmd1 | cat", ""},
+		{"test -f README.md # || true", ""}, {"test -f README.md # sleep &", ""},
+		{"test -f README.md # comment\nfalse || true", "mask"},
+	} {
+		t.Run(tc.command, func(t *testing.T) {
+			_, problems := Validate(map[string]any{"checks": initCheckList("test", tc.command)}, InitContext{})
+			var want []string
+			if tc.result != "" {
+				suffix := "ignores its own failure"
+				if tc.result == "nothing" {
+					suffix = "runs nothing"
+				}
+				want = []string{fmt.Sprintf("check test (%s) %s", tc.command, suffix)}
+			}
+			if !reflect.DeepEqual(problems, want) {
+				t.Fatalf("problems: %q, want %q", problems, want)
+			}
+		})
+	}
+	for _, role := range []string{"setup", "fix"} {
+		_, problems := Validate(map[string]any{role: []any{"false || true"}}, InitContext{})
+		if len(problems) != 0 {
+			t.Fatalf("%s: %q", role, problems)
+		}
+	}
+}
