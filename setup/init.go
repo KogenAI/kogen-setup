@@ -255,7 +255,27 @@ func initConfigure(ctx context.Context, s *sys.Session, in InitInput, repo *git.
 	if res.bridge {
 		files = map[string]string{initStepsReadmePath: initStepsReadme}
 	}
+	paths := []string{project.ConfigPath, ".gitignore"}
+	if res.bridge {
+		paths = append(paths, initStepsReadmePath)
+	}
+	saved, err := initSnapshot(root, paths)
+	if err != nil {
+		return err
+	}
 	if err := initWriteFiles(repo, root, head, initRenderConfig(cfg, route), files); err != nil {
+		return err
+	}
+	written, err := project.LoadConfig(root)
+	if err != nil {
+		err = fmt.Errorf("loading written configuration %s (verified setup commands %q, fix commands %q, checks %v): %w", project.ConfigPath, cfg.Setup, cfg.Fix, cfg.Checks, err)
+	} else {
+		err = initCompareConfig(cfg, written)
+	}
+	if err != nil {
+		if restoreErr := initRestore(root, saved); restoreErr != nil {
+			return fmt.Errorf("%w; restoring files: %v", err, restoreErr)
+		}
 		return err
 	}
 	s.Puts("Initialized Kogen in " + root)
@@ -300,19 +320,11 @@ func initConfigure(ctx context.Context, s *sys.Session, in InitInput, repo *git.
 	if len(found) > 0 {
 		s.Puts("Note: Kogen gives its models README.md only; it does not read " + strings.Join(found, ", "))
 	}
-	paths := []string{project.ConfigPath, ".gitignore"}
-	if res.bridge {
-		paths = append(paths, initStepsReadmePath)
-	}
 	sha, err := initCommit(s, repo, paths, head)
 	if err != nil {
 		return err
 	}
 	s.Puts("Commit: " + sha + " Add Kogen configuration")
-	written, err := project.LoadConfig(root)
-	if err != nil {
-		return err
-	}
 	initNextLines(s, written)
 	return nil
 }
@@ -514,6 +526,10 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 	proposed := map[string]bool{}
 	for _, c := range checks {
 		proposed[c.Name] = true
+		if strings.ContainsFunc(c.Run, unicode.IsControl) {
+			problems = append(problems, fmt.Sprintf("check %s command %q contains a control character; put one command per entry", c.Name, c.Run))
+			continue
+		}
 		if initNamesRoot(c.Run, ctx.Root) {
 			problems = append(problems, fmt.Sprintf("check %s (%s) names the project folder by absolute path; use a relative path", c.Name, c.Run))
 		}
@@ -551,7 +567,11 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 			problems = append(problems, "protect path "+p+" is not eligible: "+reason)
 		}
 	}
-	for _, command := range setup {
+	for i, command := range setup {
+		if strings.ContainsFunc(command, unicode.IsControl) {
+			problems = append(problems, fmt.Sprintf("setup entry %d command %q contains a control character; put one command per entry", i+1, command))
+			continue
+		}
 		if initRunsNothing(command) {
 			problems = append(problems, "setup command "+command+" runs nothing")
 		}
@@ -585,7 +605,11 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 			problems = append(problems, "setup command "+command+" is a one-time machine prerequisite, not recurring project setup")
 		}
 	}
-	for _, command := range fix {
+	for i, command := range fix {
+		if strings.ContainsFunc(command, unicode.IsControl) {
+			problems = append(problems, fmt.Sprintf("fix entry %d command %q contains a control character; put one command per entry", i+1, command))
+			continue
+		}
 		if initRunsNothing(command) {
 			problems = append(problems, "fix command "+command+" runs nothing")
 		}
@@ -914,7 +938,7 @@ func initStrings(args map[string]any, key string) ([]string, string) {
 	out := make([]string, 0, len(items))
 	for _, it := range items {
 		str, ok := it.(string)
-		if !ok || strings.TrimSpace(str) == "" {
+		if !ok || (strings.TrimSpace(str) == "" && !strings.ContainsFunc(str, unicode.IsControl)) {
 			return nil, key + " must be a list of non-empty commands"
 		}
 		out = append(out, str)
@@ -953,7 +977,7 @@ func initChecks(args map[string]any) ([]project.Check, []string) {
 			problems = append(problems, "check name "+name+" must be lowercase letters, digits and dashes")
 		case slices.ContainsFunc(checks, func(c project.Check) bool { return c.Name == name }):
 			problems = append(problems, "check name "+name+" is used twice")
-		case strings.TrimSpace(run) == "":
+		case strings.TrimSpace(run) == "" && !strings.ContainsFunc(run, unicode.IsControl):
 			problems = append(problems, "check "+name+" has no command")
 		default:
 			checks = append(checks, project.Check{Name: name, Run: run})

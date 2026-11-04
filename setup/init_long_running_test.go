@@ -10,7 +10,7 @@ import (
 )
 
 func TestInitValidateLongRunning(t *testing.T) {
-	for _, command := range []string{"jest --watchAll", "npx jest --watch", "vitest -w", "mocha --watch", "tsc --watch", "mix test --watch", "mix test.watch", "mix phx.server", "npm start", "npm run dev", "npm run serve", "yarn start", "yarn dev", "pnpm dev", "rails server", "rails s", "flask run", "python -m http.server", "docker compose up", "docker-compose up", "tail -f log.txt", "sleep 61", "sleep 2m", "sleep 1h", "sleep 1d", "echo ok; npm start", "echo ok && npm start", "false || npm start", "echo ok\nnpm start", "npm start | cat"} {
+	for _, command := range []string{"jest --watchAll", "npx jest --watch", "vitest -w", "mocha --watch", "tsc --watch", "mix test --watch", "mix test.watch", "mix phx.server", "npm start", "npm run dev", "npm run serve", "yarn start", "yarn dev", "pnpm dev", "rails server", "rails s", "flask run", "python -m http.server", "docker compose up", "docker-compose up", "tail -f log.txt", "sleep 61", "sleep 2m", "sleep 1h", "sleep 1d", "echo ok; npm start", "echo ok && npm start", "false || npm start", "npm start | cat"} {
 		t.Run(command, func(t *testing.T) {
 			_, problems := Validate(map[string]any{"checks": initCheckList("a", command)}, InitContext{})
 			want := "check a (" + command + ") does not exit on its own (watch or server mode); use a command that runs once"

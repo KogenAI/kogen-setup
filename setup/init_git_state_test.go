@@ -35,7 +35,7 @@ func TestInitValidateRepositoryStateParts(t *testing.T) {
 		reject  bool
 	}{
 		{"echo ok; git reset --hard", true}, {"echo ok && git reset --hard", true},
-		{"false || git clean -fd", true}, {"cat x | git stash", true}, {"echo ok\ngit reset --hard", true},
+		{"false || git clean -fd", true}, {"cat x | git stash", true},
 		{"git apply --check x; git apply y", true}, {"git reset; git clean", true}, {"git apply --check=x x.patch", true},
 		{"git apply x; echo --check", true}, {"git apply --check x.patch", false},
 		{"git diff --exit-code && make test", false}, {"git submodule update --init", false},
