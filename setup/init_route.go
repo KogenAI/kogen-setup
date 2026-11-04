@@ -93,11 +93,13 @@ func (r initRoute) models() map[string]project.Role {
 	return models
 }
 
-func initRenderConfig(cfg *project.Config, route initRoute) string {
-	rendered := project.RenderConfig(cfg)
-	text := rendered[:strings.LastIndex(rendered, "\nmodels:\n")+1]
+func initRenderConfig(cfg *project.Config) string {
+	return strings.TrimSuffix(project.RenderConfig(cfg), project.ModelsTemplate())
+}
+
+func initRenderModels(route initRoute) string {
 	var b strings.Builder
-	b.WriteString(text + "models:\n")
+	b.WriteString("models:\n")
 	models := route.models()
 	for _, name := range project.ModelRoles {
 		r := models[name]

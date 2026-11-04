@@ -39,7 +39,7 @@ func TestWrittenConfigRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := &project.Config{Setup: []string{"echo 'it''s'", "mix deps.get"}, Fix: []string{"mix format"}, Checks: []project.Check{{Name: "test", Run: "mix test"}}, Protect: []string{"mix.exs"}, Acceptance: &project.Acceptance{Run: "mix test", StepsDir: "features/steps"}}
-	if err := os.WriteFile(filepath.Join(root, project.ConfigPath), []byte(initRenderConfig(want, initRoute{"chatgpt", "gpt-5"})), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, project.ConfigPath), []byte(initRenderConfig(want)), 0600); err != nil {
 		t.Fatal(err)
 	}
 	got, err := project.LoadConfig(root)
@@ -83,7 +83,14 @@ func TestIntegrityRestoreExistingFiles(t *testing.T) {
 	if err := os.WriteFile(name, []byte("original\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	saved, err := initSnapshot(root, []string{".gitignore", "new"})
+	if err := os.MkdirAll(filepath.Join(root, ".kogen"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	models := filepath.Join(root, project.ModelsPath)
+	if err := os.WriteFile(models, []byte(project.ModelsTemplate()), 0600); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := initSnapshot(root, []string{".gitignore", project.ModelsPath, "new"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,8 +100,15 @@ func TestIntegrityRestoreExistingFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "new"), []byte("new"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(models, []byte("changed"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	if err := initRestore(root, saved); err != nil {
 		t.Fatal(err)
+	}
+	team, err := os.ReadFile(models)
+	if err != nil || string(team) != project.ModelsTemplate() {
+		t.Fatalf("models: %q %v", team, err)
 	}
 	data, err := os.ReadFile(name)
 	if err != nil || string(data) != "original\n" {

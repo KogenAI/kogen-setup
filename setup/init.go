@@ -103,6 +103,15 @@ func initRun(ctx context.Context, s *sys.Session, in InitInput) error {
 		return err
 	}
 	head := repo.Head()
+	modelsExist := false
+	if _, err := os.Stat(filepath.Join(root, project.ModelsPath)); err == nil {
+		modelsExist = true
+		if _, err := project.LoadModels(root); err != nil {
+			return err
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
 	if _, err := os.Stat(filepath.Join(root, project.ConfigPath)); err == nil {
 		if _, err := project.LoadConfig(root); err != nil {
 			return err
@@ -119,7 +128,7 @@ func initRun(ctx context.Context, s *sys.Session, in InitInput) error {
 			return nil
 		}
 	}
-	paths := []string{project.ConfigPath, ".gitignore", initStepsReadmePath}
+	paths := []string{project.ConfigPath, project.ModelsPath, ".gitignore", initStepsReadmePath}
 	dirty, err := repo.ChangedPaths(paths...)
 	if err != nil {
 		return err
@@ -153,10 +162,10 @@ func initRun(ctx context.Context, s *sys.Session, in InitInput) error {
 		return sys.Fail("environment", "no_commits",
 			fmt.Sprintf("%d file(s) are not committed yet; commit them first (git add -A && git commit -m \"Initial commit\"), then run kogen init", len(uncommitted)), 3)
 	case head == "":
-		if err := initWriteFiles(repo, root, "", project.Template(), nil); err != nil {
+		if err := initWriteFiles(repo, root, "", strings.TrimSuffix(project.Template(), project.ModelsTemplate()), map[string]string{project.ModelsPath: project.ModelsTemplate()}); err != nil {
 			return err
 		}
-		sha, err := initCommit(s, repo, []string{project.ConfigPath, ".gitignore"}, "")
+		sha, err := initCommit(s, repo, []string{project.ConfigPath, project.ModelsPath, ".gitignore"}, "")
 		if err != nil {
 			return err
 		}
@@ -166,7 +175,7 @@ func initRun(ctx context.Context, s *sys.Session, in InitInput) error {
 		s.Puts(initNextChecks)
 		return nil
 	}
-	return initConfigure(ctx, s, in, repo, root, head)
+	return initConfigure(ctx, s, in, repo, root, head, modelsExist)
 }
 
 // initCommitLeftover is SET-3: a configuration a failed init commit left behind is committed
@@ -179,7 +188,15 @@ func initCommitLeftover(s *sys.Session, repo *git.Repo, root, head string, dirty
 	if err := os.WriteFile(gitignore, []byte(initWithLine(initRead(gitignore), initIgnore)), 0o644); err != nil {
 		return err
 	}
-	paths := []string{project.ConfigPath, ".gitignore"}
+	if _, err := os.Stat(filepath.Join(root, project.ModelsPath)); os.IsNotExist(err) {
+		if err := os.WriteFile(filepath.Join(root, project.ModelsPath), []byte(project.ModelsTemplate()), 0o644); err != nil {
+			return err
+		}
+	}
+	if _, err := project.LoadModels(root); err != nil {
+		return err
+	}
+	paths := []string{project.ConfigPath, project.ModelsPath, ".gitignore"}
 	if slices.Contains(dirty, initStepsReadmePath) {
 		paths = append(paths, initStepsReadmePath)
 	}
@@ -197,7 +214,7 @@ func initCommitLeftover(s *sys.Session, repo *git.Repo, root, head string, dirty
 	return nil
 }
 
-func initConfigure(ctx context.Context, s *sys.Session, in InitInput, repo *git.Repo, root, head string) error {
+func initConfigure(ctx context.Context, s *sys.Session, in InitInput, repo *git.Repo, root, head string, modelsExist bool) error {
 	home := in.Home
 	if home == "" {
 		home = s.Getenv("HOME")
@@ -250,11 +267,14 @@ func initConfigure(ctx context.Context, s *sys.Session, in InitInput, repo *git.
 	res.filterProtect(candidates.Protect, manifests)
 
 	cfg := &project.Config{Setup: res.setup, Fix: res.fix, Checks: res.checks, Protect: res.protect, Acceptance: res.acceptance}
-	var files map[string]string
-	if res.bridge {
-		files = map[string]string{initStepsReadmePath: initStepsReadme}
+	files := map[string]string{}
+	if !modelsExist {
+		files[project.ModelsPath] = initRenderModels(route)
 	}
-	paths := []string{project.ConfigPath, ".gitignore"}
+	if res.bridge {
+		files[initStepsReadmePath] = initStepsReadme
+	}
+	paths := []string{project.ConfigPath, project.ModelsPath, ".gitignore"}
 	if res.bridge {
 		paths = append(paths, initStepsReadmePath)
 	}
@@ -262,7 +282,10 @@ func initConfigure(ctx context.Context, s *sys.Session, in InitInput, repo *git.
 	if err != nil {
 		return err
 	}
-	if err := initWriteFiles(repo, root, head, initRenderConfig(cfg, route), files); err != nil {
+	if err := initWriteFiles(repo, root, head, initRenderConfig(cfg), files); err != nil {
+		if restoreErr := initRestore(root, saved); restoreErr != nil {
+			return fmt.Errorf("%w; restoring files: %v", err, restoreErr)
+		}
 		return err
 	}
 	written, err := project.LoadConfig(root)

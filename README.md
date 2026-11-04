@@ -1,6 +1,6 @@
 # kogen-setup
 
-Kogen's setup: `kogen init` configures an existing project for Kogen. It detects the project's commands, asks the shaping model once, keeps the commands that pass on a copy of the committed tree, adds the Cucumber bridge when the project has no acceptance runner, and commits `.kogen/project.yaml`. It does not scaffold applications.
+Kogen's setup: `kogen init` configures an existing project for Kogen. It detects the project's commands, asks the shaping model once, keeps the commands that pass on a copy of the committed tree, adds the Cucumber bridge when the project has no acceptance runner, and commits `.kogen/project.yaml` and the team lineup in `.kogen/models.yaml` together. It does not scaffold applications.
 
 It is a component of [Kogen](https://github.com/KogenAI/kogen), which pins an exact version of it and assembles the `kogen` program.
 
@@ -35,7 +35,7 @@ any error go to stderr. Existing valid configuration is reported on repeat runs.
 
 ## Adopting Kogen
 
-Sign in with a supported route using `kogen provider login`, then run `kogen init`. If multiple routes are available, choose one for discovery and the initial roles. Review the selected setup, fixers, checks, acceptance runner and anything left out in `.kogen/project.yaml`; correct project-specific omissions and commit the configuration changes.
+Sign in with a supported route using `kogen provider login`, then run `kogen init`. If multiple routes are available, choose one for discovery and the initial roles. Review the selected setup, fixers, checks, acceptance runner and anything left out in `.kogen/project.yaml`; review the team lineup in `.kogen/models.yaml`, correct project-specific omissions and commit the configuration changes.
 
 ## Packages
 

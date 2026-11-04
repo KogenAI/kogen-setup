@@ -110,8 +110,12 @@ func TestInitNativeUsesExplicitHome(t *testing.T) {
 
 func TestInitRenderKeepsCommandsContainingModelsHeader(t *testing.T) {
 	cfg := &project.Config{Setup: []string{"printf 'models:\n'"}}
-	text := initRenderConfig(cfg, initRoute{name: "chatgpt"})
-	if !strings.Contains(text, "printf") || !strings.Contains(text, "effort: medium") {
-		t.Fatalf("truncated configuration: %s", text)
+	text := initRenderConfig(cfg)
+	if strings.Contains(text, "\nmodels:\n") {
+		t.Fatalf("unexpected models section: %s", text)
+	}
+	want := strings.TrimSuffix(project.RenderConfig(cfg), project.ModelsTemplate())
+	if text != want || !strings.Contains(text, "models:") {
+		t.Fatalf("command changed: %s", text)
 	}
 }

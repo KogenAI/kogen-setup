@@ -19,12 +19,12 @@ func bridge() *project.Acceptance {
 }
 
 func selectedChatGPT(cfg *project.Config) string {
-	return strings.ReplaceAll(project.RenderConfig(cfg), ":\n    model:", ":\n    provider: chatgpt\n    model:")
+	return strings.TrimSuffix(project.RenderConfig(cfg), project.ModelsTemplate())
 }
 
 // files-template and one-commit: in a repository without commits, Init writes
-// project.Template() and the `.kogen/local/` ignore line (after the existing .gitignore) and
-// makes the first commit, "Initial commit", of exactly those two files. No model is asked.
+// project.Template() without models, project.ModelsTemplate() and the `.kogen/local/` ignore line (after the existing .gitignore) and
+// makes the first commit, "Initial commit", of exactly those three files. No model is asked.
 func TestInitFirstCommitOfAnEmptyRepository(t *testing.T) {
 	f := newInitFx(t, false)
 	f.write(".gitignore", "node_modules")
@@ -37,8 +37,9 @@ func TestInitFirstCommitOfAnEmptyRepository(t *testing.T) {
 	equal(t, "requests", len(f.requests()), 0)
 	equal(t, "commits", f.countN(), 1)
 	equal(t, "subject", f.git("log", "-1", "--format=%s"), "Initial commit\n")
-	equalList(t, "committed", f.committed(), []string{".gitignore", project.ConfigPath})
-	equal(t, "project.yaml", f.read(project.ConfigPath), project.Template())
+	equalList(t, "committed", f.committed(), []string{".gitignore", project.ModelsPath, project.ConfigPath})
+	equal(t, "project.yaml", f.read(project.ConfigPath), strings.TrimSuffix(project.Template(), project.ModelsTemplate()))
+	equal(t, "models.yaml", f.read(project.ModelsPath), project.ModelsTemplate())
 	equal(t, ".gitignore", f.read(".gitignore"), "node_modules\n.kogen/local/\n")
 	equal(t, "status", f.status(), "")
 	if !contains(out, "Commit: "+f.head()[:8]+" ") {
@@ -48,7 +49,7 @@ func TestInitFirstCommitOfAnEmptyRepository(t *testing.T) {
 
 // files-render-config, files-bridge and one-commit: in a project without checks Init writes the
 // configuration through project.RenderConfig, adds the `.kogen/local/` ignore line, adds the
-// Cucumber bridge's features/steps/README.md, and commits exactly those three files in one
+// Cucumber bridge's features/steps/README.md, and commits exactly those four files in one
 // commit, "Add Kogen configuration", on the previous HEAD. Other changes stay uncommitted.
 func TestInitWritesTheConfigurationAndTheBridgeInOneCommit(t *testing.T) {
 	f := newInitFx(t, true, nothing())
@@ -69,13 +70,14 @@ func TestInitWritesTheConfigurationAndTheBridgeInOneCommit(t *testing.T) {
 		"Commit: {sha8} Add Kogen configuration",
 		nextChecks)
 	equal(t, "project.yaml", f.read(project.ConfigPath), selectedChatGPT(&project.Config{Acceptance: bridge()}))
+	equal(t, "models.yaml", f.read(project.ModelsPath), strings.ReplaceAll(project.ModelsTemplate(), ":\n    model:", ":\n    provider: chatgpt\n    model:"))
 	equal(t, ".gitignore", f.read(".gitignore"), "tmp/\n.kogen/local/\n")
 	equal(t, "steps README", f.read("features/steps/README.md"), stepsReadme)
 	equal(t, "commits", f.countN(), countN+1)
 	equal(t, "parent", f.git("log", "-1", "--format=%P"), head+"\n")
 	equal(t, "subject", f.git("log", "-1", "--format=%s"), "Add Kogen configuration\n")
 	equal(t, "author", f.git("log", "-1", "--format=%an <%ae>"), fixtureName+" <"+fixtureEmail+">\n")
-	equalList(t, "committed", f.committed(), []string{".gitignore", project.ConfigPath, "features/steps/README.md"})
+	equalList(t, "committed", f.committed(), []string{".gitignore", project.ModelsPath, project.ConfigPath, "features/steps/README.md"})
 	equal(t, "status", f.status(), " M notes.txt\n?? untracked.txt\n")
 }
 
@@ -100,7 +102,7 @@ func TestInitRendersTheCommandsThatPassed(t *testing.T) {
 		"Left out: lint (npm run lint) failed with status 2",
 		"Acceptance: Cucumber bridge added in features/steps",
 		"Commit: {sha8} Add Kogen configuration")
-	equalList(t, "committed", f.committed(), []string{".gitignore", project.ConfigPath, "features/steps/README.md"})
+	equalList(t, "committed", f.committed(), []string{".gitignore", project.ModelsPath, project.ConfigPath, "features/steps/README.md"})
 	equal(t, "status", f.status(), "")
 }
 
@@ -114,7 +116,7 @@ func TestInitWithoutABridgeWritesNoStepsReadme(t *testing.T) {
 	out, _ := f.mustRun()
 	equal(t, "steps README written", f.exists("features/steps/README.md"), false)
 	equal(t, "project.yaml", f.read(project.ConfigPath), selectedChatGPT(&project.Config{}))
-	equalList(t, "committed", f.committed(), []string{".gitignore", project.ConfigPath})
+	equalList(t, "committed", f.committed(), []string{".gitignore", project.ModelsPath, project.ConfigPath})
 	if !contains(out, "\nAcceptance: not configured: ") || !contains(out, nextAcceptance+"\n") {
 		t.Fatalf("stdout %q", out)
 	}

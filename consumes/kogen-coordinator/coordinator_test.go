@@ -113,8 +113,11 @@ func TestRepositoryAndConfig(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, project.ConfigPath), []byte(project.Template()), 0600); err != nil {
 		t.Fatal(err)
 	}
-	defaults, err := project.LoadConfig(root)
-	if err != nil || !reflect.DeepEqual(defaults.Models, project.DefaultModels()) {
+	if err := os.WriteFile(filepath.Join(root, project.ModelsPath), []byte(project.ModelsTemplate()), 0600); err != nil {
+		t.Fatal(err)
+	}
+	defaults, err := project.LoadModels(root)
+	if err != nil || !reflect.DeepEqual(defaults.Roles, project.DefaultModels()) {
 		t.Fatalf("template %+v %v", defaults, err)
 	}
 	d := project.Detect(map[string]string{"package.json": `{"scripts":{"test":"test"},"devDependencies":{"@cucumber/cucumber":"1"}}`, "package-lock.json": "{}"}, []string{"package-lock.json", "features/steps/a.js"})

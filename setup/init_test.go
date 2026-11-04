@@ -624,10 +624,10 @@ func TestInitEmptyRepositoryMakesTheFirstCommit(t *testing.T) {
 	if errs != "" || len(f.requests()) != 0 {
 		t.Fatalf("stderr %q, %d requests", errs, len(f.requests()))
 	}
-	if f.subject() != "Initial commit" || !reflect.DeepEqual(f.commitFiles(), []string{".gitignore", ".kogen/project.yaml"}) {
+	if f.subject() != "Initial commit" || !reflect.DeepEqual(f.commitFiles(), []string{".gitignore", ".kogen/models.yaml", ".kogen/project.yaml"}) {
 		t.Fatalf("commit %q %v", f.subject(), f.commitFiles())
 	}
-	if f.read(".kogen/project.yaml") != project.Template() || f.read(".gitignore") != ".kogen/local/\n" {
+	if f.read(".kogen/project.yaml") != strings.TrimSuffix(project.Template(), project.ModelsTemplate()) || f.read(project.ModelsPath) != project.ModelsTemplate() || f.read(".gitignore") != ".kogen/local/\n" {
 		t.Fatalf("files: %q %q", f.read(".kogen/project.yaml"), f.read(".gitignore"))
 	}
 	if st := f.dirtyPaths(); st != "" {
@@ -741,7 +741,7 @@ func TestInitConfiguresAProjectWithoutChecksAndAddsTheBridge(t *testing.T) {
 	if !strings.Contains(errs, "kogen: init gpt-6.1-sol/high input=100 cached=0 output=20 reasoning=5 wall_ms=") {
 		t.Errorf("stderr lacks the usage line:\n%s", errs)
 	}
-	if got := f.commitFiles(); !reflect.DeepEqual(got, []string{".gitignore", ".kogen/project.yaml", "features/steps/README.md"}) {
+	if got := f.commitFiles(); !reflect.DeepEqual(got, []string{".gitignore", ".kogen/models.yaml", ".kogen/project.yaml", "features/steps/README.md"}) {
 		t.Fatalf("commit files %v", got)
 	}
 	if f.subject() != "Add Kogen configuration" {
@@ -969,7 +969,7 @@ func TestInitUsesTheProjectsOwnCucumberRunner(t *testing.T) {
 		"Left out: lint (npm run lint) failed with status 2",
 		"Acceptance: existing Cucumber runner, steps in features/step_definitions",
 		"Commit: {sha8} Add Kogen configuration")
-	if got := f.commitFiles(); !reflect.DeepEqual(got, []string{".gitignore", ".kogen/project.yaml"}) {
+	if got := f.commitFiles(); !reflect.DeepEqual(got, []string{".gitignore", ".kogen/models.yaml", ".kogen/project.yaml"}) {
 		t.Fatalf("commit files %v", got)
 	}
 	yaml := f.read(".kogen/project.yaml")
@@ -1016,7 +1016,7 @@ func TestInitBridgeThatWritesNoReportIsNotAdded(t *testing.T) {
 		"Acceptance: not configured: the runner check wrote no report",
 		"Commit: {sha8} Add Kogen configuration",
 		initNextAcceptance, initNextChecks)
-	if f.exists("features/steps/README.md") || !reflect.DeepEqual(f.commitFiles(), []string{".gitignore", ".kogen/project.yaml"}) {
+	if f.exists("features/steps/README.md") || !reflect.DeepEqual(f.commitFiles(), []string{".gitignore", ".kogen/models.yaml", ".kogen/project.yaml"}) {
 		t.Fatalf("files %v", f.commitFiles())
 	}
 }
@@ -1136,9 +1136,16 @@ func TestInitAlreadyInitializedChangesNothing(t *testing.T) {
 	f.write("README.md", "x\n")
 	f.commitAll("a")
 	f.mustRun()
+	team := "models:\n  shape:\n    model: gpt-6.1-sol\n    effort: low\n"
+	f.write(project.ModelsPath, team)
+	f.commitAll("team selection")
 	head := f.head()
 	f.out.Reset()
 	out, errs := f.mustRun()
+	lineup, err := project.LoadModels(f.repo)
+	if err != nil || lineup.Roles["shape"].Effort != "low" || f.read(project.ModelsPath) != team {
+		t.Fatalf("team lineup changed: %+v %v", lineup, err)
+	}
 	initWantLines(t, out, "Kogen is already initialized in "+f.repo, initNextChecks)
 	if errs != "" || f.head() != head || len(f.requests()) != 1 || f.dirtyPaths() != "" {
 		t.Fatalf("stderr %q head %s requests %d", errs, f.head(), len(f.requests()))
@@ -1165,7 +1172,7 @@ func TestInitCommitsTheConfigurationAFailedInitLeftBehind(t *testing.T) {
 	f.write(".gitignore", "build")
 	out, _ := f.mustRun()
 	initWantLines(t, out, "Initialized Kogen in "+f.repo, "Commit: {sha8} Add Kogen configuration")
-	if got := f.commitFiles(); !reflect.DeepEqual(got, []string{".gitignore", ".kogen/project.yaml", "features/steps/README.md"}) {
+	if got := f.commitFiles(); !reflect.DeepEqual(got, []string{".gitignore", ".kogen/models.yaml", ".kogen/project.yaml", "features/steps/README.md"}) {
 		t.Fatalf("commit files %v", got)
 	}
 	if got := f.read(".gitignore"); got != "build\n.kogen/local/\n" {
@@ -1244,16 +1251,20 @@ func TestInitCommitFailureLeavesTheFilesUncommitted(t *testing.T) {
 	if !strings.HasPrefix(out, "Initialized Kogen in "+f.repo+"\n") || strings.Contains(out, "Commit:") {
 		t.Fatalf("stdout %q", out)
 	}
-	if f.head() != head || !f.exists(".kogen/project.yaml") {
+	if f.head() != head || !f.exists(".kogen/project.yaml") || !f.exists(project.ModelsPath) {
 		t.Fatal("state after the failed commit")
 	}
 	if st := f.dirtyPaths(); st != "?? .gitignore\n?? .kogen/\n?? features/\n" {
 		t.Fatalf("status %q", st)
 	}
 	// The next init commits what was left (SET-3).
+	team := f.read(project.ModelsPath)
 	os.Remove(filepath.Join(hooks, "pre-commit"))
 	initWantAfter, _ := f.mustRun()
 	initWantLines(t, initWantAfter, "Initialized Kogen in "+f.repo, "Commit: {sha8} Add Kogen configuration", initNextChecks)
+	if f.read(project.ModelsPath) != team || !slices.Contains(f.commitFiles(), project.ModelsPath) {
+		t.Fatal("leftover lineup not committed unchanged")
+	}
 }
 
 func TestInitFirstCommitFailureLeavesNothingStaged(t *testing.T) {
@@ -1340,10 +1351,12 @@ func TestInitMutationPathListAtFive(t *testing.T) {
 	for _, tc := range []struct{ command, paths string }{
 		{"echo y > b.txt; echo y > a.txt", "a.txt, b.txt"},
 		{"for p in e.txt d.txt c.txt b.txt a.txt; do echo y > \"$p\"; done", "a.txt, b.txt, c.txt, d.txt, e.txt"},
+		{"for p in .kogen/models.yaml d.txt c.txt b.txt a.txt; do echo y > \"$p\"; done", ".kogen/models.yaml, a.txt, b.txt, c.txt, d.txt"},
 	} {
 		t.Run(tc.paths, func(t *testing.T) {
 			f := initNewFx(t, true, initSubmit(map[string]any{"setup": []any{}, "fix": []any{}, "checks": []any{map[string]any{"name": "fmt", "run": tc.command}, map[string]any{"name": "ok", "run": "test -f README.md"}}, "protect": []any{}}))
 			f.write("README.md", "fixture\n")
+			f.write(project.ModelsPath, project.ModelsTemplate())
 			for _, p := range []string{"a.txt", "b.txt", "c.txt", "d.txt", "e.txt"} {
 				f.write(p, "x\n")
 			}
@@ -1850,5 +1863,21 @@ func TestInitValidateNormalizedProtectStillRequiresEligibility(t *testing.T) {
 	_, problems := Validate(map[string]any{"protect": []string{"./mix.exs"}}, ctx)
 	if len(problems) != 1 || !strings.HasPrefix(problems[0], "protect path mix.exs is not eligible:") {
 		t.Fatalf("problems: %q", problems)
+	}
+}
+
+func TestInitPreservesExistingTeamLineup(t *testing.T) {
+	f := initNewFx(t, true, initNothing())
+	team := "models:\n  shape:\n    model: gpt-6.1-sol\n    effort: low\n"
+	f.write("README.md", "fixture\n")
+	f.write(project.ModelsPath, team)
+	f.commitAll("team")
+	f.mustRun()
+	if f.read(project.ModelsPath) != team || len(f.requests()) != 1 {
+		t.Fatal("existing team lineup changed")
+	}
+	lineup, err := project.LoadModels(f.repo)
+	if err != nil || lineup.Roles["shape"].Effort != "low" {
+		t.Fatalf("lineup %+v %v", lineup, err)
 	}
 }
