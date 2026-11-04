@@ -24,8 +24,9 @@ func TestInitOmittedSetupRestoresBeforeConsumers(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			clean := `test "$(cat tracked)" = original && test "$(cat deps/old)" = kept && test -d kept && test ! -e deps/x && test ! -e newdir && test ! -e marker`
+			fix := clean + " && test -f tracked"
 			kept := "mkdir -p kept deps; echo kept > deps/old"
-			f := initNewFx(t, true, initSubmit(map[string]any{"setup": []any{kept, tc.command, clean}, "fix": []any{clean}, "checks": initCheckList("clean", clean, "leak", "test -e newdir/x"), "protect": []any{}}))
+			f := initNewFx(t, true, initSubmit(map[string]any{"setup": []any{kept, tc.command, clean}, "fix": []any{fix}, "checks": initCheckList("clean", clean, "leak", "test -e newdir/x"), "protect": []any{}}))
 			f.write("tracked", "original\n")
 			f.write(".gitignore", "deps/\n")
 			f.commitAll("fixture")
@@ -46,7 +47,7 @@ exit 0`)
 			if len(cfg.Checks) != 1 || cfg.Checks[0].Name != "clean" {
 				t.Fatalf("checks: %#v", cfg.Checks)
 			}
-			if !reflect.DeepEqual(cfg.Fix, []string{clean}) {
+			if !reflect.DeepEqual(cfg.Fix, []string{fix}) {
 				t.Fatalf("fix: %#v", cfg.Fix)
 			}
 			data, err := os.ReadFile(log)

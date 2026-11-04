@@ -257,7 +257,7 @@ func initConfigure(ctx context.Context, s *sys.Session, in InitInput, repo *git.
 	if err := initCommittedCopy(s, repo, root, clone, tracked); err != nil {
 		return err
 	}
-	candidates := Merge(detected, proposed)
+	candidates, drops := initMerge(detected, proposed)
 	res, err := initVerify(ctx, s, in, repo, clone, tracked, candidates, detected.Runner)
 	if err != nil {
 		return err
@@ -328,6 +328,9 @@ func initConfigure(ctx context.Context, s *sys.Session, in InitInput, repo *git.
 		if p, ok := byName[c.Name]; ok && c.Run != p.Run {
 			s.Puts("Replaced: " + c.Name + " (" + c.Run + ") with (" + p.Run + ")")
 		}
+	}
+	for _, drop := range drops {
+		s.Puts(drop)
 	}
 	if len(res.leftOut) > 0 {
 		s.Puts("Left out: " + strings.Join(res.leftOut, "; "))
@@ -1275,6 +1278,11 @@ func initPackageVerification(text string, checks []project.Check) bool {
 // the detected ones; proposed setup entries and fixers follow the detected ones unless
 // already present; protect is the union; checks with the same command run once.
 func Merge(detected project.Detected, proposed InitProposal) InitProposal {
+	merged, _ := initMerge(detected, proposed)
+	return merged
+}
+
+func initMerge(detected project.Detected, proposed InitProposal) (InitProposal, []string) {
 	byName := map[string]project.Check{}
 	for _, c := range proposed.Checks {
 		byName[c.Name] = c
@@ -1302,12 +1310,29 @@ func Merge(detected project.Detected, proposed InitProposal) InitProposal {
 			unique = append(unique, c)
 		}
 	}
+	setup := initUnion(detected.Setup, proposed.Setup)
+	reasons := map[string]string{}
+	for _, c := range unique {
+		reasons[initCommandKey(c.Run)] = "checks"
+	}
+	for _, command := range setup {
+		reasons[initCommandKey(command)] = "setup"
+	}
+	fix := []string{}
+	var drops []string
+	for _, command := range initUnion(detected.Fix, proposed.Fix) {
+		if reason, ok := reasons[initCommandKey(command)]; ok {
+			drops = append(drops, "Dropped: fix: "+command+" (already in "+reason+")")
+		} else {
+			fix = append(fix, command)
+		}
+	}
 	return InitProposal{
-		Setup:   initUnion(detected.Setup, proposed.Setup),
-		Fix:     initUnion(detected.Fix, proposed.Fix),
+		Setup:   setup,
+		Fix:     fix,
 		Checks:  unique,
 		Protect: initPathUnion(detected.Protect, proposed.Protect),
-	}
+	}, drops
 }
 
 // initCommandKey preserves quoted bytes while normalizing outside spaces and tabs.

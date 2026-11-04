@@ -907,7 +907,7 @@ func TestInitSetupThatFailsIsLeftOut(t *testing.T) {
 func TestInitLeavesOutAFailingFixerAndKeepsAPassingOne(t *testing.T) {
 	parallel(t)
 	f := initNewFx(t, true, initSubmit(map[string]any{
-		"setup": []any{}, "fix": []any{"echo boom-fix >&2; exit 5", "test -f README.md"}, "checks": []any{map[string]any{"name": "ok", "run": "test -f README.md"}}, "protect": []any{}}))
+		"setup": []any{}, "fix": []any{"echo boom-fix >&2; exit 5", "test -f README.md && test -r README.md"}, "checks": []any{map[string]any{"name": "ok", "run": "test -f README.md"}}, "protect": []any{}}))
 	f.write("README.md", "# notes\n")
 	f.commitAll("notes")
 	out, errs := f.mustRun()
@@ -918,12 +918,12 @@ func TestInitLeavesOutAFailingFixerAndKeepsAPassingOne(t *testing.T) {
 		"Left out: fix-1 (echo boom-fix >&2; exit 5) failed with status 5",
 		"Acceptance: Cucumber bridge added in features/steps",
 		"Commit: {sha8} Add Kogen configuration")
-	for _, line := range []string{"kogen: checking ok: test -f README.md", "kogen: running fix-1: echo boom-fix >&2; exit 5\n  | boom-fix\nkogen: running fix-2: test -f README.md"} {
+	for _, line := range []string{"kogen: checking ok: test -f README.md", "kogen: running fix-1: echo boom-fix >&2; exit 5\n  | boom-fix\nkogen: running fix-2: test -f README.md && test -r README.md"} {
 		if !strings.Contains(errs, line+"\n") {
 			t.Errorf("stderr lacks %q:\n%s", line, errs)
 		}
 	}
-	if cfg := f.config(); !reflect.DeepEqual(cfg.Fix, []string{"test -f README.md"}) {
+	if cfg := f.config(); !reflect.DeepEqual(cfg.Fix, []string{"test -f README.md && test -r README.md"}) {
 		t.Fatalf("config %+v", cfg)
 	}
 }
@@ -1879,5 +1879,59 @@ func TestInitPreservesExistingTeamLineup(t *testing.T) {
 	lineup, err := project.LoadModels(f.repo)
 	if err != nil || lineup.Roles["shape"].Effort != "low" {
 		t.Fatalf("lineup %+v %v", lineup, err)
+	}
+}
+
+func TestInitMergeDropsFixOnlyAfterCheckReplacement(t *testing.T) {
+	detected := project.Detected{
+		Setup:  []string{"npm ci"},
+		Fix:    []string{"npm ci", "make  lint", "old check", "make lint --fix"},
+		Checks: []project.Check{{Name: "lint", Run: "old check"}},
+	}
+	proposed := InitProposal{
+		Setup:  []string{"make lint"},
+		Fix:    []string{"npm  ci", "make lint FILTER=unit", "npm run format"},
+		Checks: []project.Check{{Name: "lint", Run: "make lint"}},
+	}
+	want := InitProposal{
+		Setup:  []string{"npm ci", "make lint"},
+		Fix:    []string{"old check", "make lint --fix", "make lint FILTER=unit", "npm run format"},
+		Checks: []project.Check{{Name: "lint", Run: "make lint"}}, Protect: []string{},
+	}
+	if got := Merge(detected, proposed); !reflect.DeepEqual(got, want) {
+		t.Fatalf("merge = %+v, want %+v", got, want)
+	}
+}
+
+func TestInitMergeDropsFixMatchingChecks(t *testing.T) {
+	got := Merge(project.Detected{Fix: []string{"make  lint"}}, InitProposal{Fix: []string{"make lint --fix", "make lint FILTER=unit"}, Checks: []project.Check{{Name: "lint", Run: "make lint"}}})
+	want := InitProposal{Setup: []string{}, Fix: []string{"make lint --fix", "make lint FILTER=unit"}, Checks: []project.Check{{Name: "lint", Run: "make lint"}}, Protect: []string{}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("merge = %+v, want %+v", got, want)
+	}
+}
+
+func TestInitDropsRedundantFixBeforeVerification(t *testing.T) {
+	f := initNewFx(t, true, initSubmit(map[string]any{"setup": []any{"test -f README.md"}, "fix": []any{"test  -f README.md", "test -r README.md"}, "checks": initCheckList("readable", "test -r README.md"), "protect": []any{}}))
+	f.write("README.md", "fixture\n")
+	f.commitAll("fixture")
+	out, stderr := f.mustRun()
+	if strings.Contains(stderr, "kogen: running fix-") {
+		t.Fatalf("redundant fixer verified: %s", stderr)
+	}
+	if len(f.config().Fix) != 0 {
+		t.Fatalf("fixers saved: %v", f.config().Fix)
+	}
+	for _, line := range []string{"Dropped: fix: test  -f README.md (already in setup)", "Dropped: fix: test -r README.md (already in checks)"} {
+		if strings.Count(out, line+"\n") != 1 {
+			t.Fatalf("missing or repeated %q: %s", line, out)
+		}
+	}
+}
+
+func TestInitMergeFixPreservesQuotedWhitespace(t *testing.T) {
+	got := Merge(project.Detected{}, InitProposal{Setup: []string{`printf 'a  b'`}, Fix: []string{`printf  'a  b'`, `printf 'a b'`}})
+	if !reflect.DeepEqual(got.Fix, []string{`printf 'a b'`}) {
+		t.Fatalf("fix = %q", got.Fix)
 	}
 }
