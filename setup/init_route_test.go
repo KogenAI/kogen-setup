@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/KogenAI/kogen-coordinator/project"
-	"kogen-loop/provider"
-	"kogen-loop/sys"
+	"github.com/KogenAI/kogen-loop/provider"
+	"github.com/KogenAI/kogen-loop/sys"
 )
 
 func TestInitRouteChild(t *testing.T) {

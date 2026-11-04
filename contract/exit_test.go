@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/KogenAI/kogen-coordinator/project"
-	"kogen-loop/sys"
+	"github.com/KogenAI/kogen-loop/sys"
 )
 
 // exit-success: 0 and no error for the three outcomes that succeed: the first commit of an

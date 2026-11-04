@@ -4,7 +4,7 @@ import (
 	"embed"
 	"fmt"
 
-	"kogen-loop/tools"
+	"github.com/KogenAI/kogen-loop/tools"
 )
 
 // The setup conversation's model-facing policy: the init prompt (prompts/init.md) and its one

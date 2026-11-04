@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"kogen-loop/provider"
-	"kogen-loop/sys"
+	"github.com/KogenAI/kogen-loop/provider"
+	"github.com/KogenAI/kogen-loop/sys"
 )
 
 // Copied from kogen-shaping shape/response_budget_test.go: the setup conversation of init with

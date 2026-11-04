@@ -1,8 +1,8 @@
 package setup
 
 import (
-	"kogen-loop/provider"
-	"kogen-loop/tools"
+	"github.com/KogenAI/kogen-loop/provider"
+	"github.com/KogenAI/kogen-loop/tools"
 )
 
 // Copied from kogen-shaping shape/conversation.go: the three conversation helpers Init uses.

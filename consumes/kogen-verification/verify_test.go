@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/KogenAI/kogen-loop/sys"
 	"github.com/KogenAI/kogen-verification/verify"
-	"kogen-loop/sys"
 )
 
 func TestCopyAndRunner(t *testing.T) {

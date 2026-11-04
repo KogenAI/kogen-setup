@@ -10,9 +10,9 @@ import (
  "github.com/KogenAI/kogen-executor/executor/claudecode"
  "github.com/KogenAI/kogen-setup/setup"
  "github.com/KogenAI/kogen-verification/verify"
- "kogen-loop/provider"
- "kogen-loop/sys"
- "kogen-loop/tools"
+ "github.com/KogenAI/kogen-loop/provider"
+ "github.com/KogenAI/kogen-loop/sys"
+ "github.com/KogenAI/kogen-loop/tools"
 )
 
 // qualify uses the exact acceptance transport/runtime fixture through its pinned

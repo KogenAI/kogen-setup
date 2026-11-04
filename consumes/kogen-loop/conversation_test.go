@@ -13,9 +13,9 @@ import (
 	"strings"
 	"testing"
 
-	"kogen-loop/provider"
-	"kogen-loop/sys"
-	"kogen-loop/tools"
+	"github.com/KogenAI/kogen-loop/provider"
+	"github.com/KogenAI/kogen-loop/sys"
+	"github.com/KogenAI/kogen-loop/tools"
 )
 
 func TestRespondAndConversation(t *testing.T) {

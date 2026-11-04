@@ -24,10 +24,10 @@ import (
 	"github.com/KogenAI/kogen-coordinator/git"
 	"github.com/KogenAI/kogen-coordinator/project"
 	"github.com/KogenAI/kogen-executor/agent"
+	"github.com/KogenAI/kogen-loop/provider"
+	"github.com/KogenAI/kogen-loop/sys"
+	"github.com/KogenAI/kogen-loop/tools"
 	"github.com/KogenAI/kogen-verification/verify"
-	"kogen-loop/provider"
-	"kogen-loop/sys"
-	"kogen-loop/tools"
 )
 
 // ---- Init: `kogen init` (SET-1..5, SET-10..13) ----
