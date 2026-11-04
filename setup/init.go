@@ -536,6 +536,50 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		}
 		return out
 	}
+	validateSyntax := func(list, command string) {
+		cmd := exec.Command("sh", "-n", "-c", command)
+		cmd.Env = []string{}
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		err := cmd.Run()
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			if _, secret := initCredentialLiteral(command); !secret {
+				line, _, _ := strings.Cut(stderr.String(), "\n")
+				problems = append(problems, list+" command "+command+" is not valid shell syntax: "+line)
+			}
+		}
+	}
+	for _, kind := range []string{"setup", "fix"} {
+		switch entries := args[kind].(type) {
+		case []string:
+			for _, command := range entries {
+				validateSyntax(kind, command)
+			}
+		case []any:
+			for _, entry := range entries {
+				if command, ok := entry.(string); ok {
+					validateSyntax(kind, command)
+				}
+			}
+		}
+	}
+	var rawChecks []any
+	switch entries := args["checks"].(type) {
+	case []any:
+		rawChecks = entries
+	case []map[string]any:
+		for _, entry := range entries {
+			rawChecks = append(rawChecks, entry)
+		}
+	}
+	for _, entry := range rawChecks {
+		if check, ok := entry.(map[string]any); ok {
+			if command, ok := check["run"].(string); ok {
+				validateSyntax("check", command)
+			}
+		}
+	}
 	setup, fix, rawProtect := list("setup"), list("fix"), list("protect")
 	var protect []string
 	for _, input := range rawProtect {
