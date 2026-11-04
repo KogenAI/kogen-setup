@@ -683,6 +683,9 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		if initRunsNothing(command, true) {
 			problems = append(problems, "setup command "+command+" runs nothing")
 		}
+		if initMasksFailure(command) {
+			problems = append(problems, "setup command "+command+" ignores its own failure")
+		}
 		for _, part := range initSetupPartsRE.Split(command, -1) {
 			part = strings.TrimSpace(part)
 			words := strings.Fields(part)

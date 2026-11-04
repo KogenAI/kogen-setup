@@ -1542,6 +1542,9 @@ func TestInitValidateSetupFixRunsNothing(t *testing.T) {
 				if tc.reject {
 					want = []string{kind + " command " + tc.command + " runs nothing"}
 				}
+				if kind == "setup" && tc.command == "printf ok; true" {
+					want = append(want, "setup command printf ok; true ignores its own failure")
+				}
 				if !reflect.DeepEqual(problems, want) {
 					t.Fatalf("problems: %q, want %q", problems, want)
 				}
@@ -1820,11 +1823,49 @@ func TestInitValidateFailureMasks(t *testing.T) {
 			}
 		})
 	}
-	for _, role := range []string{"setup", "fix"} {
-		_, problems := Validate(map[string]any{role: []any{"false || true"}}, InitContext{})
-		if len(problems) != 0 {
-			t.Fatalf("%s: %q", role, problems)
-		}
+	_, problems := Validate(map[string]any{"fix": []any{"false || true"}}, InitContext{})
+	if len(problems) != 0 {
+		t.Fatalf("fix: %q", problems)
+	}
+}
+
+func TestInitValidateSetupFailureMasks(t *testing.T) {
+	for _, command := range []string{
+		"false || true", "bundle install; true", "npm ci; :", "npm ci; exit 0", "npm ci &",
+		"npm ci || true", "npm ci || :", "npm ci || exit 0",
+	} {
+		t.Run(command, func(t *testing.T) {
+			got, problems := Validate(map[string]any{"setup": []any{command}}, InitContext{})
+			want := []string{"setup command " + command + " ignores its own failure"}
+			if !reflect.DeepEqual(problems, want) || !reflect.DeepEqual(got, InitProposal{}) {
+				t.Fatalf("got proposal %+v, problems %q; want zero proposal and %q", got, problems, want)
+			}
+		})
+	}
+	for _, command := range []string{
+		"npm ci", "npm ci || (cat log; exit 1)", "if false; then true; fi",
+		"case x in x) true;; esac", "sleep 1 & wait", `test -f "a || true"`,
+	} {
+		t.Run(command, func(t *testing.T) {
+			got, problems := Validate(map[string]any{"setup": []any{command}}, InitContext{})
+			if len(problems) != 0 || reflect.DeepEqual(got, InitProposal{}) {
+				t.Fatalf("got proposal %+v, problems %q", got, problems)
+			}
+		})
+	}
+	for _, tc := range []struct {
+		command string
+		want    []string
+	}{
+		{"echo 'a || true'", []string{"setup command echo 'a || true' runs nothing"}},
+		{"npm test || true", []string{"setup command npm test || true ignores its own failure", "setup command npm test runs tests or linting; put it in checks"}},
+	} {
+		t.Run(tc.command, func(t *testing.T) {
+			got, problems := Validate(map[string]any{"setup": []any{tc.command}}, InitContext{})
+			if !reflect.DeepEqual(problems, tc.want) || !reflect.DeepEqual(got, InitProposal{}) {
+				t.Fatalf("got proposal %+v, problems %q; want zero proposal and %q", got, problems, tc.want)
+			}
+		})
 	}
 }
 
