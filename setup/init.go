@@ -49,6 +49,7 @@ var (
 	initManifestNames    = []string{"mix.exs", "package.json", "mix.lock", "package-lock.json", "npm-shrinkwrap.json", "go.mod", "go.sum"}
 	initWorkflowRE       = regexp.MustCompile(`^\.github/workflows/[^/]+\.ya?ml$`)
 	initCheckNameRE      = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*\n?$`)
+	initSetupPartsRE     = regexp.MustCompile(`;|&&|\|\||\n`)
 	initCommandPartsRE   = regexp.MustCompile(`;|&&|\|\||\||\n`)
 	initLocalToolsRE     = regexp.MustCompile(`(?:^|[;&]\s*)mix\s+local\.(?:hex|rebar)\b`)
 	initNpmScriptRE      = regexp.MustCompile(`\bnpm\s+(?:run\s+)?([a-zA-Z0-9:_-]+)\b`)
@@ -539,6 +540,17 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		}
 	}
 	for _, command := range setup {
+		for _, part := range initSetupPartsRE.Split(command, -1) {
+			part = strings.TrimSpace(part)
+			words := strings.Fields(part)
+			for _, suite := range []string{"mix test", "go test", "go vet", "npm test", "npm run test", "npm run lint", "yarn test", "pnpm test", "pytest", "python -m pytest", "cargo test", "cargo clippy", "bundle exec rspec", "rspec", "rake test"} {
+				prefix := strings.Fields(suite)
+				if len(words) >= len(prefix) && slices.Equal(words[:len(prefix)], prefix) {
+					problems = append(problems, "setup command "+part+" runs tests or linting; put it in checks")
+					break
+				}
+			}
+		}
 		if initNamesRoot(command, ctx.Root) {
 			problems = append(problems, "setup command "+command+" names the project folder by absolute path; use a relative path")
 		}

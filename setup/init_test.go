@@ -1680,3 +1680,52 @@ func TestInitCorrectsProjectRootCheck(t *testing.T) {
 		t.Fatalf("checks: %v", checks)
 	}
 }
+
+func TestInitValidateSetupSuites(t *testing.T) {
+	for _, command := range []string{"mix test", "go test ./...", "go vet", "npm test", "npm run test", "npm run lint", "yarn test", "pnpm test", "pytest", "python -m pytest", "cargo test", "cargo clippy", "bundle exec rspec", "rspec", "rake test"} {
+		_, got := Validate(map[string]any{"setup": []any{command}}, InitContext{})
+		want := []string{"setup command " + command + " runs tests or linting; put it in checks"}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%q: %q", command, got)
+		}
+	}
+	for _, separator := range []string{";", "&&", "||", "\n"} {
+		_, got := Validate(map[string]any{"setup": []any{"npm ci " + separator + "  go test ./...  "}}, InitContext{})
+		want := []string{"setup command go test ./... runs tests or linting; put it in checks"}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%q: %q", separator, got)
+		}
+	}
+	for _, command := range []string{"npm ci", "mix deps.get", "mix compile", "go mod download", "cargo fetch", "echo mix test", "npm run testing", "mix testing", "python -m pytestfoo", "echo ok | go test"} {
+		_, got := Validate(map[string]any{"setup": []any{command}}, InitContext{})
+		if len(got) != 0 {
+			t.Errorf("%q: %q", command, got)
+		}
+	}
+	for _, args := range []map[string]any{{"fix": []any{"go test ./..."}}, {"checks": initCheckList("test", "go test ./...")}} {
+		_, got := Validate(args, InitContext{})
+		if len(got) != 0 {
+			t.Errorf("%v: %q", args, got)
+		}
+	}
+}
+
+func TestInitCorrectsSetupSuiteBeforeExecution(t *testing.T) {
+	f := initNewFx(t, true, initSubmit(map[string]any{"setup": []any{"go test ./..."}}), initNothing())
+	f.write("README.md", "notes\n")
+	f.commitAll("notes")
+	exit, _, _, err := f.run("")
+	if err != nil || exit != 0 {
+		t.Fatalf("exit %d, error %v", exit, err)
+	}
+	if len(f.requests()) != 2 {
+		t.Fatalf("requests: %d", len(f.requests()))
+	}
+	body, _ := json.Marshal(f.requests()[1])
+	if !strings.Contains(string(body), "setup command go test ./... runs tests or linting; put it in checks") {
+		t.Fatalf("correction: %s", body)
+	}
+	if setup := f.config().Setup; len(setup) != 0 {
+		t.Fatalf("setup: %v", setup)
+	}
+}
