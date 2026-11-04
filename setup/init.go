@@ -59,6 +59,7 @@ var (
 	initSetupPartsRE     = regexp.MustCompile(`;|&&|\|\||\n`)
 	initCommandPartsRE   = regexp.MustCompile(`;|&&|\|\||\||\n`)
 	initNpmScriptRE      = regexp.MustCompile(`\bnpm\s+(?:run\s+)?([a-zA-Z0-9:_-]+)\b`)
+	initTerminatedRE     = regexp.MustCompile(`Terminated(?:: 15)?$`)
 	initNoTestsRE        = regexp.MustCompile(`(?m)(?:^\?[\t ]+\S+[\t ]+\[no test files\][\t ]*$|\b0 tests, 0 failures\b|\bRan 0 tests\b|\bNo tests found\b|\b0 passing\b)`)
 	initPositiveTestsRE  = regexp.MustCompile(`(?m)(?:\b0*[1-9][0-9]* tests\b|\bRan 0*[1-9][0-9]* tests\b|\b0*[1-9][0-9]* passing\b|^ok[\t ]+\S+|^PASS(?:[\t ]|$))`)
 	initMixTaskRE        = regexp.MustCompile(`\bmix\s+([a-z][a-z0-9_.-]*)\b`)
@@ -328,6 +329,7 @@ func initConfigure(ctx context.Context, s *sys.Session, in InitInput, repo *git.
 		setup = strings.Join(res.setup, "; ")
 	}
 	s.Puts("Setup: " + setup)
+	s.Puts("Fix: " + initList(res.fix))
 	var checks string
 	switch {
 	case len(res.checks) > 0:
@@ -354,6 +356,7 @@ func initConfigure(ctx context.Context, s *sys.Session, in InitInput, repo *git.
 	for _, drop := range drops {
 		s.Puts(drop)
 	}
+	s.Puts("Protect: " + initList(res.protect))
 	if len(res.leftOut) > 0 {
 		s.Puts("Left out: " + strings.Join(res.leftOut, "; "))
 	}
@@ -374,6 +377,14 @@ func initConfigure(ctx context.Context, s *sys.Session, in InitInput, repo *git.
 	s.Puts("Commit: " + sha + " Add Kogen configuration")
 	initNextLines(s, written)
 	return nil
+}
+
+// initList renders kept entries for the summary, "none" when there are none.
+func initList(entries []string) string {
+	if len(entries) == 0 {
+		return "none"
+	}
+	return strings.Join(entries, "; ")
 }
 
 func initNextLines(s *sys.Session, cfg *project.Config) {
@@ -1534,7 +1545,7 @@ func initExec(s *sys.Session, tools verify.Tools, command, dir string, timeout t
 	}
 	r, err := s.Run(initShellCommand(command), dir, sys.Options{Env: env, KillGroupOnExit: true, Timeout: timeout})
 	if r.TimedOut {
-		r.Output = strings.TrimSuffix(strings.TrimSuffix(r.Output, "\n"), "Terminated")
+		r.Output = initTerminatedRE.ReplaceAllString(strings.TrimSuffix(r.Output, "\n"), "")
 	}
 	return r, err
 }

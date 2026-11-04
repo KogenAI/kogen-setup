@@ -41,7 +41,7 @@ func TestInitExcludesCheckThatRanNoTests(t *testing.T) {
 	f.write("README.md", "x\n")
 	f.commitAll("notes")
 	out, _ := f.mustRun()
-	initWantLines(t, out, "Initialized Kogen in "+f.repo, "Setup: none", "Checks: none passed", "Left out: sample ("+command+") ran no tests", "Acceptance: Cucumber bridge added in features/steps", "Commit: {sha8} Add Kogen configuration", initNextChecks)
+	initWantLines(t, out, "Initialized Kogen in "+f.repo, "Setup: none", "Fix: none", "Checks: none passed", "Protect: none", "Left out: sample ("+command+") ran no tests", "Acceptance: Cucumber bridge added in features/steps", "Commit: {sha8} Add Kogen configuration", initNextChecks)
 	if checks := f.config().Checks; len(checks) != 0 {
 		t.Fatalf("checks: %v", checks)
 	}
@@ -58,7 +58,7 @@ func TestInitRejectsSecondRunMutationAndNoTests(t *testing.T) {
 	f.write("README.md", "original\n")
 	f.commitAll("fixture")
 	out, _ := f.mustRun()
-	initWantLines(t, out, "Initialized Kogen in "+f.repo, "Setup: none", "Checks: clean", "Left out: mutation ("+mutation+") changed README.md; empty ("+empty+") ran no tests", "Acceptance: Cucumber bridge added in features/steps", "Commit: {sha8} Add Kogen configuration")
+	initWantLines(t, out, "Initialized Kogen in "+f.repo, "Setup: none", "Fix: none", "Checks: clean", "Protect: none", "Left out: mutation ("+mutation+") changed README.md; empty ("+empty+") ran no tests", "Acceptance: Cucumber bridge added in features/steps", "Commit: {sha8} Add Kogen configuration")
 	checks := f.config().Checks
 	if len(checks) != 1 || checks[0].Name != "clean" {
 		t.Fatalf("checks: %v", checks)

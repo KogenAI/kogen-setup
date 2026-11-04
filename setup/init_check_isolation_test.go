@@ -15,7 +15,7 @@ func TestInitCheckCleanupOnRejectionAndSuccess(t *testing.T) {
 	f.write("README.md", "original\n")
 	f.commitAll("fixture")
 	out, _ := f.mustRun()
-	initWantLines(t, out, "Initialized Kogen in "+f.repo, "Setup: "+setup, "Checks: success, clean", "Left out: mutation ("+mutation+") changed README.md; empty ("+empty+") ran no tests", "Acceptance: Cucumber bridge added in features/steps", "Commit: {sha8} Add Kogen configuration")
+	initWantLines(t, out, "Initialized Kogen in "+f.repo, "Setup: "+setup, "Fix: none", "Checks: success, clean", "Protect: none", "Left out: mutation ("+mutation+") changed README.md; empty ("+empty+") ran no tests", "Acceptance: Cucumber bridge added in features/steps", "Commit: {sha8} Add Kogen configuration")
 	checks := f.config().Checks
 	if len(checks) != 2 || checks[0].Name != "success" || checks[1].Name != "clean" {
 		t.Fatalf("checks: %v", checks)
@@ -31,5 +31,5 @@ func TestInitCheckCleanupUsesBaselineIgnoreRules(t *testing.T) {
 	f.write(".gitignore", "node_modules/\n")
 	f.commitAll("fixture")
 	out, _ := f.mustRun()
-	initWantLines(t, out, "Initialized Kogen in "+f.repo, "Setup: mkdir -p node_modules && echo dependency > node_modules/installed", "Checks: clean", "Left out: mutate ("+mutate+") failed with status 1", "Acceptance: Cucumber bridge added in features/steps", "Commit: {sha8} Add Kogen configuration")
+	initWantLines(t, out, "Initialized Kogen in "+f.repo, "Setup: mkdir -p node_modules && echo dependency > node_modules/installed", "Fix: none", "Checks: clean", "Protect: none", "Left out: mutate ("+mutate+") failed with status 1", "Acceptance: Cucumber bridge added in features/steps", "Commit: {sha8} Add Kogen configuration")
 }

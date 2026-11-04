@@ -65,7 +65,9 @@ func TestInitWritesTheConfigurationAndTheBridgeInOneCommit(t *testing.T) {
 	wantLines(t, out,
 		"Initialized Kogen in "+f.repo,
 		"Setup: none",
+		"Fix: none",
 		"Checks: none found",
+		"Protect: none",
 		"Acceptance: Cucumber bridge added in features/steps",
 		"Commit: {sha8} Add Kogen configuration",
 		nextChecks)
@@ -98,7 +100,9 @@ func TestInitRendersTheCommandsThatPassed(t *testing.T) {
 	wantLines(t, out,
 		"Initialized Kogen in "+f.repo,
 		"Setup: npm ci --no-audit --no-fund",
+		"Fix: none",
 		"Checks: test",
+		"Protect: none",
 		"Left out: lint (npm run lint) failed with status 2",
 		"Acceptance: Cucumber bridge added in features/steps",
 		"Commit: {sha8} Add Kogen configuration")

@@ -724,7 +724,9 @@ func TestInitConfiguresAProjectWithoutChecksAndAddsTheBridge(t *testing.T) {
 	initWantLines(t, out,
 		"Initialized Kogen in "+f.repo,
 		"Setup: none",
+		"Fix: none",
 		"Checks: none found",
+		"Protect: none",
 		"Acceptance: Cucumber bridge added in features/steps",
 		"Note: Kogen gives its models README.md only; it does not read CLAUDE.md, .cursor/rules",
 		"Commit: {sha8} Add Kogen configuration",
@@ -788,7 +790,9 @@ func TestInitLeavesOutAFailingCheckOnTheCommittedTree(t *testing.T) {
 	initWantLines(t, out,
 		"Initialized Kogen in "+f.repo,
 		"Setup: mix deps.get",
+		"Fix: mix format",
 		"Checks: format, test",
+		"Protect: .formatter.exs",
 		"Left out: compile (mix compile --warnings-as-errors) failed with status 1",
 		"Acceptance: Cucumber bridge added in features/steps",
 		"Commit: {sha8} Add Kogen configuration")
@@ -872,7 +876,9 @@ func TestInitLeavesOutSetupThatCannotRunTwiceOnTheSameTree(t *testing.T) {
 	initWantLines(t, out,
 		"Initialized Kogen in "+f.repo,
 		"Setup: test -f README.md",
+		"Fix: none",
 		"Checks: none passed", // quirk kept: left-out setup entries count
+		"Protect: none",
 		"Left out: setup-1 (mkdir seeded) is not repeatable: its second run failed with status 1; setup-2 (echo run >> runs.txt) is not repeatable: its second run changed runs.txt",
 		"Acceptance: Cucumber bridge added in features/steps",
 		"Commit: {sha8} Add Kogen configuration",
@@ -892,7 +898,9 @@ func TestInitSetupThatFailsIsLeftOut(t *testing.T) {
 	initWantLines(t, out,
 		"Initialized Kogen in "+f.repo,
 		"Setup: none",
+		"Fix: test -f README.md",
 		"Checks: none passed",
+		"Protect: none",
 		"Left out: setup-1 (exit 4) failed with status 4; fails (exit 7) failed with status 7",
 		"Acceptance: Cucumber bridge added in features/steps",
 		"Commit: {sha8} Add Kogen configuration",
@@ -914,7 +922,9 @@ func TestInitLeavesOutAFailingFixerAndKeepsAPassingOne(t *testing.T) {
 	initWantLines(t, out,
 		"Initialized Kogen in "+f.repo,
 		"Setup: none",
+		"Fix: test -f README.md && test -r README.md",
 		"Checks: ok",
+		"Protect: none",
 		"Left out: fix-1 (echo boom-fix >&2; exit 5) failed with status 5",
 		"Acceptance: Cucumber bridge added in features/steps",
 		"Commit: {sha8} Add Kogen configuration")
@@ -940,7 +950,9 @@ func TestInitRunsFixersOnceAfterTheChecksOnTheCopy(t *testing.T) {
 	initWantLines(t, out,
 		"Initialized Kogen in "+f.repo,
 		"Setup: none",
+		"Fix: echo rewritten > README.md; echo run >> runs.txt && test ! -e .git && test -n \"$KOGEN_NODE\"",
 		"Checks: same",
+		"Protect: none",
 		"Acceptance: Cucumber bridge added in features/steps",
 		"Commit: {sha8} Add Kogen configuration")
 	if cfg := f.config(); !reflect.DeepEqual(cfg.Fix, []string{rewrite, again}) {
@@ -965,7 +977,9 @@ func TestInitUsesTheProjectsOwnCucumberRunner(t *testing.T) {
 	initWantLines(t, out,
 		"Initialized Kogen in "+f.repo,
 		"Setup: npm ci --no-audit --no-fund",
+		"Fix: none",
 		"Checks: test, docs",
+		"Protect: none",
 		"Left out: lint (npm run lint) failed with status 2",
 		"Acceptance: existing Cucumber runner, steps in features/step_definitions",
 		"Commit: {sha8} Add Kogen configuration")
@@ -993,7 +1007,9 @@ func TestInitReportsAnExistingRunnerThatDoesNotStart(t *testing.T) {
 	initWantLines(t, out,
 		"Initialized Kogen in "+f.repo,
 		"Setup: none",
+		"Fix: none",
 		"Checks: none found",
+		"Protect: none",
 		"Acceptance: not configured: the runner check failed with status 1",
 		"Commit: {sha8} Add Kogen configuration",
 		initNextAcceptance, initNextChecks)
@@ -1012,7 +1028,9 @@ func TestInitBridgeThatWritesNoReportIsNotAdded(t *testing.T) {
 	initWantLines(t, out,
 		"Initialized Kogen in "+f.repo,
 		"Setup: none",
+		"Fix: none",
 		"Checks: none found",
+		"Protect: none",
 		"Acceptance: not configured: the runner check wrote no report",
 		"Commit: {sha8} Add Kogen configuration",
 		initNextAcceptance, initNextChecks)
@@ -1375,7 +1393,7 @@ func TestInitRejectsMutatingChecksAndRestoresSetupState(t *testing.T) {
 	f.write("b.txt", "x\n")
 	f.commitAll("seed")
 	out, _ := f.mustRun()
-	initWantLines(t, out, "Initialized Kogen in "+f.repo, "Setup: echo setup > setup.txt", "Checks: ok, scratch", "Left out: fmt (echo y > a.txt) changed a.txt; delete (rm b.txt) changed b.txt", "Acceptance: Cucumber bridge added in features/steps", "Commit: {sha8} Add Kogen configuration")
+	initWantLines(t, out, "Initialized Kogen in "+f.repo, "Setup: echo setup > setup.txt", "Fix: none", "Checks: ok, scratch", "Protect: none", "Left out: fmt (echo y > a.txt) changed a.txt; delete (rm b.txt) changed b.txt", "Acceptance: Cucumber bridge added in features/steps", "Commit: {sha8} Add Kogen configuration")
 	cfg := f.config()
 	if len(cfg.Checks) != 2 || cfg.Checks[0].Name != "ok" || cfg.Checks[1].Name != "scratch" {
 		t.Fatalf("checks: %+v", cfg.Checks)
@@ -1400,7 +1418,7 @@ func TestInitMutationPathListAtFive(t *testing.T) {
 			}
 			f.commitAll("seed")
 			out, _ := f.mustRun()
-			initWantLines(t, out, "Initialized Kogen in "+f.repo, "Setup: none", "Checks: ok", "Left out: fmt ("+tc.command+") changed "+tc.paths, "Acceptance: Cucumber bridge added in features/steps", "Commit: {sha8} Add Kogen configuration")
+			initWantLines(t, out, "Initialized Kogen in "+f.repo, "Setup: none", "Fix: none", "Checks: ok", "Protect: none", "Left out: fmt ("+tc.command+") changed "+tc.paths, "Acceptance: Cucumber bridge added in features/steps", "Commit: {sha8} Add Kogen configuration")
 		})
 	}
 }
@@ -1415,7 +1433,7 @@ func TestInitRestoresTrackedFilesWhenCheckReplacesTheirDirectory(t *testing.T) {
 	f.write("dir/b.txt", "y\n")
 	f.commitAll("seed")
 	out, _ := f.mustRun()
-	initWantLines(t, out, "Initialized Kogen in "+f.repo, "Setup: none", "Checks: ok", "Left out: delete (rm -rf dir; echo x > dir) changed dir/a.txt, dir/b.txt", "Acceptance: Cucumber bridge added in features/steps", "Commit: {sha8} Add Kogen configuration")
+	initWantLines(t, out, "Initialized Kogen in "+f.repo, "Setup: none", "Fix: none", "Checks: ok", "Protect: none", "Left out: delete (rm -rf dir; echo x > dir) changed dir/a.txt, dir/b.txt", "Acceptance: Cucumber bridge added in features/steps", "Commit: {sha8} Add Kogen configuration")
 }
 
 func TestInitResultFiltersProtectionForKeptChecks(t *testing.T) {
