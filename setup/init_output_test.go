@@ -88,7 +88,7 @@ func TestInitLeftOutIncludesNewlyIneligibleProtection(t *testing.T) {
 	if exit != 0 || err != nil {
 		t.Fatalf("exit %d err %v stdout %s stderr %s", exit, err, out, stderr)
 	}
-	initWantLines(t, out, "Initialized Kogen in "+f.repo, "Setup: none", "Fix: none", "Checks: ok", "Protect: none", "Left out: lint (npm run lint) failed with status 2; package.json", "Acceptance: Cucumber bridge added in features/steps", "Commit: {sha8} Add Kogen configuration")
+	initWantLines(t, out, "Initialized Kogen in "+f.repo, "Setup: none", "Fix: none", "Checks: ok", "Protect: none", "Left out: lint (npm run lint) failed with status 2; protect package.json: npm package and dependency metadata is editable; verification definitions or embedded settings can be protected as a whole", "Acceptance: Cucumber bridge added in features/steps", "Commit: {sha8} Add Kogen configuration")
 	if cfg := f.config(); len(cfg.Protect) != 0 {
 		t.Fatalf("protect: %v", cfg.Protect)
 	}

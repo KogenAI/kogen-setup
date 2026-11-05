@@ -1460,8 +1460,13 @@ func TestInitResultFiltersProtectionForKeptChecks(t *testing.T) {
 		want, omitted []string
 	}{
 		{"lint and mix kept", []project.Check{lint, mix, ok}, false, protect, nil},
-		{"only ok", []project.Check{ok}, false, []string{"README.md", "docs.md"}, []string{"package.json", "mix.exs"}},
-		{"embedded settings", []project.Check{ok}, true, []string{"README.md", "package.json", "docs.md"}, []string{"mix.exs"}},
+		{"only ok", []project.Check{ok}, false, []string{"README.md", "docs.md"}, []string{
+			"protect package.json: npm package and dependency metadata is editable; verification definitions or embedded settings can be protected as a whole",
+			"protect mix.exs: Mix project and dependency metadata is editable; verification definitions or embedded settings can be protected as a whole",
+		}},
+		{"embedded settings", []project.Check{ok}, true, []string{"README.md", "package.json", "docs.md"}, []string{
+			"protect mix.exs: Mix project and dependency metadata is editable; verification definitions or embedded settings can be protected as a whole",
+		}},
 		{"none", nil, false, nil, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -1610,8 +1610,8 @@ func (res *initResult) filterProtect(protect []string, manifests map[string]stri
 	}
 	for _, p := range protect {
 		text, ok := manifests[p]
-		if initProtectProblem(p, text, ok, res.checks) != "" {
-			res.leftOut = append(res.leftOut, p)
+		if reason := initProtectProblem(p, text, ok, res.checks); reason != "" {
+			res.leftOut = append(res.leftOut, "protect "+p+": "+reason)
 		} else {
 			res.protect = append(res.protect, p)
 		}
