@@ -18,7 +18,7 @@ Feature: k-setup-models-file: Store init lineups with the coordinator
       "$base/setup" "$PWD"
       test -f .kogen/models.yaml
       grep -q '^models:$' .kogen/models.yaml
-      ! grep -q '^models:' .kogen/project.yaml
+      if grep -q '^models:' .kogen/project.yaml; then exit 1; fi
       test "$(git rev-list --count HEAD)" = 1
       git show HEAD:.kogen/models.yaml > "$base/committed"
       cmp .kogen/models.yaml "$base/committed"
