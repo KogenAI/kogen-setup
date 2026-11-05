@@ -38,7 +38,7 @@ func TestValidateCredentials(t *testing.T) {
 			}
 		}
 	}
-	for _, cmd := range []string{"npm config set //registry.invalid/:_authToken=$NPM_TOKEN", "API_KEY= make build", "npm ci", "tool --token=${API_KEY}", `tool --password "$NPM_TOKEN"`, "tool abc123def"} {
+	for _, cmd := range []string{"npm config set //registry.invalid/:_authToken=$NPM_TOKEN", "API_KEY= make build", "npm run build", "tool --token=${API_KEY}", `tool --password "$NPM_TOKEN"`, "tool abc123def"} {
 		if _, p := Validate(map[string]any{"fix": []any{cmd}}, InitContext{}); len(p) != 0 {
 			t.Errorf("%q: %v", cmd, p)
 		}

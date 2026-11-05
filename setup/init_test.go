@@ -1615,6 +1615,9 @@ func TestInitValidateSetupFixRunsNothing(t *testing.T) {
 			t.Run(kind+"/"+tc.command, func(t *testing.T) {
 				_, problems := Validate(map[string]any{kind: []any{tc.command}}, InitContext{})
 				var want []string
+				if kind == "fix" && initInstallsDependencies(tc.command) {
+					want = []string{"fix command " + tc.command + " installs dependencies; put the install in setup"}
+				}
 				if tc.reject {
 					want = []string{kind + " command " + tc.command + " runs nothing"}
 				}

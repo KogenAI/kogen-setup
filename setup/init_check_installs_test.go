@@ -34,8 +34,35 @@ func TestValidateCheckInstallsDependencies(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %q, want %q", got, want)
 	}
-	_, got = Validate(map[string]any{"setup": []any{"npm ci"}, "fix": []any{"npm ci"}, "checks": initCheckList("suite", "npm test")}, InitContext{})
+	_, got = Validate(map[string]any{"setup": []any{"npm ci"}, "fix": []any{"npm run format"}, "checks": initCheckList("suite", "npm test")}, InitContext{})
 	if len(got) != 0 {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestValidateFixInstallsDependencies(t *testing.T) {
+	for _, command := range []string{"npm install", "mix deps.get", "npm ci", "npm i"} {
+		t.Run(command, func(t *testing.T) {
+			proposal, got := Validate(map[string]any{"fix": []any{command}}, InitContext{})
+			want := []string{"fix command " + command + " installs dependencies; put the install in setup"}
+			if !reflect.DeepEqual(got, want) || !reflect.DeepEqual(proposal, InitProposal{}) {
+				t.Fatalf("got %+v, %q, want zero proposal and %q", proposal, got, want)
+			}
+		})
+	}
+	_, got := Validate(map[string]any{"fix": []any{"npm ci || true"}}, InitContext{})
+	want := []string{"fix command npm ci || true installs dependencies; put the install in setup", "fix command npm ci || true ignores its own failure"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	command := "mix format\nmix deps.get"
+	_, got = Validate(map[string]any{"fix": []any{command}}, InitContext{})
+	want = []string{fmt.Sprintf("fix entry 1 command %q contains a control character; put one command per entry", command)}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	proposal, got := Validate(map[string]any{"fix": []any{"npm run format", "gofmt -w ."}}, InitContext{})
+	if len(got) != 0 || !reflect.DeepEqual(proposal.Fix, []string{"npm run format", "gofmt -w ."}) {
+		t.Fatalf("got %+v, %q", proposal, got)
 	}
 }

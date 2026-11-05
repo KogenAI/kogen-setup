@@ -794,6 +794,9 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 			problems = append(problems, fmt.Sprintf("fix entry %d command %q contains a control character; put one command per entry", i+1, command))
 			continue
 		}
+		if initInstallsDependencies(command) {
+			problems = append(problems, "fix command "+command+" installs dependencies; put the install in setup")
+		}
 		if initRunsNothing(command, true) {
 			problems = append(problems, "fix command "+command+" runs nothing")
 		}
