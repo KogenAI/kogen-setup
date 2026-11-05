@@ -1555,17 +1555,24 @@ func TestInitValidateRunsNothing(t *testing.T) {
 	for _, tc := range []struct {
 		command string
 		reject  bool
+		want    []string
 	}{
-		{"true", true}, {":", true},
-		{"echo \"tests passed\"", false},
-		{"echo 'a;b|c'", false}, {`printf "%s\n" ok`, false}, {`echo "\$(pwd)"`, false},
-		{`echo "$(pwd)"`, false}, {"test -f README.md", false},
-		{"echo hi > out.txt", false}, {"go vet ./... && echo done", false},
-		{"echo $(pwd)", false}, {"echo `pwd`", false},
+		{"true", true, nil}, {":", true, nil},
+		{"echo \"tests passed\"", false, nil},
+		{"echo 'a;b|c'", false, nil}, {`printf "%s\n" ok`, false, nil}, {`echo "\$(pwd)"`, false, nil},
+		{`echo "$(pwd)"`, false, nil}, {"test -f README.md", false, nil},
+		{"echo hi > out.txt", false, nil}, {"go vet ./... && echo done", false, nil},
+		{"echo $(pwd)", false, nil}, {"echo `pwd`", false, nil},
+		{"echo ok && exit 0", false, nil},
+		{"printf '%s' ok; true || : | echo done; exit 0", false, []string{"check a (printf '%s' ok; true || : | echo done; exit 0) ignores its own failure"}},
 	} {
 		t.Run(tc.command, func(t *testing.T) {
 			_, problems := Validate(map[string]any{"checks": initCheckList("a", tc.command)}, InitContext{})
-			if tc.reject {
+			if tc.want != nil {
+				if !reflect.DeepEqual(problems, tc.want) {
+					t.Fatalf("problems: %q, want %q", problems, tc.want)
+				}
+			} else if tc.reject {
 				if len(problems) != 1 || !strings.Contains(problems[0], "a") || !strings.Contains(problems[0], "runs nothing") {
 					t.Fatalf("problems: %q", problems)
 				}
