@@ -1724,6 +1724,9 @@ func initOutputTail(output string) []string {
 	}
 	for i, line := range lines {
 		chars := initCleanOutputLine([]rune(line))
+		if redacted, ok := initCredentialLiteral(string(chars)); ok {
+			chars = []rune(redacted)
+		}
 		if len(chars) > 200 {
 			chars = chars[:200]
 		}

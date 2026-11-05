@@ -51,6 +51,11 @@ func TestInitOutputTail(t *testing.T) {
 		{"\x1b(Bx\n", []string{"  | (Bx"}},
 		{"\x1b[31m" + strings.Repeat("界", 200), []string{"  | " + strings.Repeat("界", 200)}},
 		{"\x1b[31m" + strings.Repeat("界", 201), []string{"  | " + strings.Repeat("界", 200)}},
+		{"API_TOKEN=abcd1234secretvalue\nplain line\n", []string{"  | API_TOKEN=***", "  | plain line"}},
+		{"Authorization: Bearer abc123def456\n", []string{"  | Authorization: Bearer ***"}},
+		{"fetching https://bot:hunter2secret@git.invalid/x.git\n", []string{"  | fetching https://bot:***@git.invalid/x.git"}},
+		{"\x1b[31mAPI_TOKEN=abc\x1b[0m\n", []string{"  | API_TOKEN=***"}},
+		{strings.Repeat("0", 180) + " https://bot:abcdefghijklmnop@git.invalid/x.git\n", []string{"  | " + strings.Repeat("0", 180) + " https://bot:***@git"}},
 	} {
 		if got := initOutputTail(tc.input); !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("%q: %q want %q", tc.input, got, tc.want)
