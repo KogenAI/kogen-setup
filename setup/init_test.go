@@ -1618,8 +1618,8 @@ func TestInitValidateSetupFixRunsNothing(t *testing.T) {
 				if tc.reject {
 					want = []string{kind + " command " + tc.command + " runs nothing"}
 				}
-				if kind == "setup" && tc.command == "printf ok; true" {
-					want = append(want, "setup command printf ok; true ignores its own failure")
+				if tc.command == "printf ok; true" {
+					want = append(want, kind+" command printf ok; true ignores its own failure")
 				}
 				if !reflect.DeepEqual(problems, want) {
 					t.Fatalf("problems: %q, want %q", problems, want)
@@ -1933,9 +1933,29 @@ func TestInitValidateFailureMasks(t *testing.T) {
 			}
 		})
 	}
-	_, problems := Validate(map[string]any{"fix": []any{"false || true"}}, InitContext{})
-	if len(problems) != 0 {
-		t.Fatalf("fix: %q", problems)
+	for _, command := range []string{
+		"false || true", "gofmt -w . || true", "gofmt -w .; true", "gofmt -w . || :",
+		"gofmt -w . || exit 0", "gofmt -w . &",
+	} {
+		t.Run("fix/"+command, func(t *testing.T) {
+			got, problems := Validate(map[string]any{"fix": []any{command}}, InitContext{})
+			want := []string{"fix command " + command + " ignores its own failure"}
+			if !reflect.DeepEqual(problems, want) || !reflect.DeepEqual(got, InitProposal{}) {
+				t.Fatalf("got proposal %+v, problems %q; want zero proposal and %q", got, problems, want)
+			}
+		})
+	}
+	for _, fix := range [][]any{
+		{"gofmt -w ."}, {"gofmt -w . || (echo failed; exit 1)"},
+	} {
+		got, problems := Validate(map[string]any{"fix": fix}, InitContext{})
+		if len(problems) != 0 || !reflect.DeepEqual(got.Fix, []string{fix[0].(string)}) {
+			t.Fatalf("fix %v: proposal %+v, problems %q", fix, got, problems)
+		}
+	}
+	_, problems := Validate(map[string]any{"fix": []any{"gofmt -w .", "gofmt -w . || true", "mkdir -p tmp"}}, InitContext{})
+	if want := []string{"fix command gofmt -w . || true ignores its own failure"}; !reflect.DeepEqual(problems, want) {
+		t.Fatalf("several fix: %q, want %q", problems, want)
 	}
 }
 
