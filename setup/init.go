@@ -46,6 +46,7 @@ const (
 	initMaxFix          = 10
 	initMaxChecks       = 20
 	initMaxProtect      = 50
+	initMaxCommand      = 2000
 )
 
 // A check name is at most initCheckNameMax characters; a refusal shows its
@@ -54,6 +55,9 @@ const (
 	initCheckNameMax   = 64
 	initCheckNameShown = 20
 )
+
+// initCommandShown is how many characters of an over-long command a refusal shows.
+const initCommandShown = 40
 
 var (
 	initExecTimeout      = initCommandTimeout
@@ -614,6 +618,9 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		}
 	}
 	validateSyntax := func(list, command string) {
+		if initCommandTooLong(command) {
+			return
+		}
 		cmd := exec.Command("sh", "-n", "-c", command)
 		cmd.Env = []string{}
 		var stderr bytes.Buffer
@@ -687,6 +694,10 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 	proposed := map[string]bool{}
 	for _, c := range checks {
 		proposed[c.Name] = true
+		if initCommandTooLong(c.Run) {
+			problems = append(problems, initCommandLengthProblem("check "+c.Name, c.Run))
+			continue
+		}
 		if redacted, found := initCredentialLiteral(c.Run); found {
 			problems = append(problems, "check command "+redacted+" contains a credential literal; read it from the environment instead")
 			continue
@@ -744,6 +755,10 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		}
 	}
 	for i, command := range setup {
+		if initCommandTooLong(command) {
+			problems = append(problems, initCommandLengthProblem("setup", command))
+			continue
+		}
 		if redacted, found := initCredentialLiteral(command); found {
 			problems = append(problems, "setup command "+redacted+" contains a credential literal; read it from the environment instead")
 			continue
@@ -793,6 +808,10 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		}
 	}
 	for i, command := range fix {
+		if initCommandTooLong(command) {
+			problems = append(problems, initCommandLengthProblem("fix", command))
+			continue
+		}
 		if redacted, found := initCredentialLiteral(command); found {
 			problems = append(problems, "fix command "+redacted+" contains a credential literal; read it from the environment instead")
 			continue
@@ -1295,6 +1314,24 @@ func initRunsNothing(command string, printIsNothing bool) bool {
 // tab, which is ordinary whitespace inside a one-line command.
 func initControlNotTab(r rune) bool {
 	return r != '\t' && unicode.IsControl(r)
+}
+
+func initCommandTooLong(command string) bool {
+	return utf8.RuneCountInString(command) > initMaxCommand
+}
+
+// initCommandLengthProblem refuses an over-long command, showing only the start of
+// it after credential redaction, quoted when that start holds a control character.
+func initCommandLengthProblem(kind, command string) string {
+	redacted, _ := initCredentialLiteral(command)
+	shown := redacted
+	if runes := []rune(redacted); len(runes) > initCommandShown {
+		shown = string(runes[:initCommandShown])
+	}
+	if strings.ContainsFunc(shown, unicode.IsControl) {
+		shown = strconv.Quote(shown)
+	}
+	return kind + " command " + shown + "… is longer than " + strconv.Itoa(initMaxCommand) + " characters; put long scripts in a file in the project and run that"
 }
 
 func initStrings(args map[string]any, key string) ([]string, string) {

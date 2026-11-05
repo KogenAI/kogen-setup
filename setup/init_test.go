@@ -271,12 +271,52 @@ func TestInitValidateShapes(t *testing.T) {
 			[]string{`check name "lint\naaaaaaaaaaaaaaa"… is longer than 64 characters`}},
 		{"long multibyte name", map[string]any{"checks": initCheckList(strings.Repeat("é", 65), "make lint")},
 			[]string{"check name éééééééééééééééééééé… is longer than 64 characters"}},
+		{"2001-character commands", map[string]any{
+			"setup":  []any{strings.Repeat("x", 2001)},
+			"fix":    []any{strings.Repeat("x", 2001)},
+			"checks": initCheckList("lint", strings.Repeat("x", 2001))},
+			[]string{
+				"check lint command " + strings.Repeat("x", 40) + "… is longer than 2000 characters; put long scripts in a file in the project and run that",
+				"setup command " + strings.Repeat("x", 40) + "… is longer than 2000 characters; put long scripts in a file in the project and run that",
+				"fix command " + strings.Repeat("x", 40) + "… is longer than 2000 characters; put long scripts in a file in the project and run that"}},
+		{"2001-character multibyte check", map[string]any{"checks": initCheckList("lint", "echo "+strings.Repeat("é", 1996))},
+			[]string{"check lint command echo " + strings.Repeat("é", 35) + "… is longer than 2000 characters; put long scripts in a file in the project and run that"}},
+		{"long check with a credential literal", map[string]any{"checks": initCheckList("lint", "TOKEN=abc123 make lint # "+strings.Repeat("x", 1980))},
+			[]string{"check lint command TOKEN=*** make lint # " + strings.Repeat("x", 18) + "… is longer than 2000 characters; put long scripts in a file in the project and run that"}},
+		{"long setup command with a control character", map[string]any{"setup": []any{"make\n" + strings.Repeat("x", 2000)}},
+			[]string{`setup command "make\n` + strings.Repeat("x", 35) + `"… is longer than 2000 characters; put long scripts in a file in the project and run that`}},
+		{"long command with bad shell syntax", map[string]any{"fix": []any{"if " + strings.Repeat("x", 2000)}},
+			[]string{"fix command if " + strings.Repeat("x", 37) + "… is longer than 2000 characters; put long scripts in a file in the project and run that"}},
+		{"long command of a refused check name", map[string]any{"checks": initCheckList("model", strings.Repeat("x", 2001))},
+			[]string{"check name model is reserved"}},
 		{"invalid arguments", map[string]any{"__invalid__": true}, nil},
 	}
 	for _, c := range cases {
 		if _, got := Validate(c.args, InitContext{}); !reflect.DeepEqual(got, c.want) {
 			t.Errorf("%s: problems %q, want %q", c.name, got, c.want)
 		}
+	}
+}
+
+func TestInitValidateCommandLengthBoundary(t *testing.T) {
+	parallel(t)
+	args := map[string]any{
+		"setup":  []any{"touch " + strings.Repeat("a", 1994)},
+		"fix":    []any{"touch " + strings.Repeat("b", 1994)},
+		"checks": initCheckList("lint", "echo "+strings.Repeat("é", 1995)),
+	}
+	proposal, problems := Validate(args, InitContext{Root: "/work/project"})
+	if len(problems) != 0 {
+		t.Fatalf("problems %q", problems)
+	}
+	if proposal.Setup[0] != args["setup"].([]any)[0] || proposal.Fix[0] != args["fix"].([]any)[0] || proposal.Checks[0].Run != "echo "+strings.Repeat("é", 1995) {
+		t.Errorf("proposal %v changed the commands", proposal)
+	}
+	long := strings.Repeat("z", 1971)
+	_, problems = Validate(map[string]any{"checks": initCheckList("lint", "cat /work/project/README.md # "+long)}, InitContext{Root: "/work/project"})
+	want := "check lint command cat /work/project/README.md # " + strings.Repeat("z", 10) + "… is longer than 2000 characters; put long scripts in a file in the project and run that"
+	if !reflect.DeepEqual(problems, []string{want}) {
+		t.Errorf("problems %q, want %q", problems, want)
 	}
 }
 
