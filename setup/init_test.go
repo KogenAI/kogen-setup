@@ -1752,7 +1752,7 @@ func TestInitValidateProjectRootCommands(t *testing.T) {
 		kind, command, root string
 		reject              bool
 	}{
-		{"setup", "cd /work/app && make test", "/work/app", true},
+		{"setup", "cd /work/app && make build", "/work/app", true},
 		{"fix", "rm -rf /work/app/build", "/work/app", true},
 		{"checks", "ls /work/app/src", "/work/app", true},
 		{"checks", "ls /work/app", "/work/app", true},
@@ -1761,7 +1761,7 @@ func TestInitValidateProjectRootCommands(t *testing.T) {
 		{"checks", "make test", "/work/app", false},
 		{"checks", "ls /work/app-other", "/work/app", false},
 		{"checks", "cd \"$PWD\" && make test", "/work/app", false},
-		{"setup", "make test", "/work/app", false},
+		{"setup", "make build", "/work/app", false},
 		{"fix", "ls /work/app-other", "/work/app", false},
 		{"checks", "ls /work/app", "", false},
 		{"checks", "ls /work/a.b/src", "/work/a.b", true},
@@ -1839,10 +1839,44 @@ func TestInitValidateSetupSuites(t *testing.T) {
 			t.Errorf("%q: %q", command, got)
 		}
 	}
-	for _, args := range []map[string]any{{"fix": []any{"go test ./..."}}, {"checks": initCheckList("test", "go test ./...")}} {
-		_, got := Validate(args, InitContext{})
+	for _, command := range []string{"CI=1 npm test", "npx jest", "time go test ./...", "env CI=1 npm test", "pnpm exec jest", "yarn jest", "bunx vitest run", "npx eslint .", "CI=1 FORCE_COLOR=0 npx jest --ci", "time make test", "make test", "make lint", "just test", "jest", "vitest run", "eslint .", "ruff check .", "ruff .", "tox", "mvn test", "gradle test", "dotnet test", "phpunit"} {
+		_, got := Validate(map[string]any{"setup": []any{command}}, InitContext{})
+		want := []string{"setup command " + command + " runs tests or linting; put it in checks"}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("setup %q: %q", command, got)
+		}
+	}
+	_, got := Validate(map[string]any{"setup": []any{"npm ci && CI=1 npm test"}}, InitContext{})
+	if want := []string{"setup command CI=1 npm test runs tests or linting; put it in checks"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("setup part: %q", got)
+	}
+	for _, command := range []string{"go test ./...", "CI=1 npm test", "npx eslint .", "make lint", "go vet ./..."} {
+		_, got := Validate(map[string]any{"fix": []any{command}}, InitContext{})
+		want := []string{"fix command " + command + " runs tests or linting; put it in checks"}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("fix %q: %q", command, got)
+		}
+	}
+	_, got = Validate(map[string]any{"fix": []any{"gofmt -w . && go vet ./..."}}, InitContext{})
+	if want := []string{"fix command go vet ./... runs tests or linting; put it in checks"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("fix part: %q", got)
+	}
+	for _, command := range []string{"CI=1 npm ci", "env CI=1 npm ci", "yarn install --frozen-lockfile", "pnpm exec prisma generate", "make build", "just build", "make testdata", "npm run testing", "ruff format ."} {
+		_, got := Validate(map[string]any{"setup": []any{command}}, InitContext{})
 		if len(got) != 0 {
-			t.Errorf("%v: %q", args, got)
+			t.Errorf("setup %q: %q", command, got)
+		}
+	}
+	for _, command := range []string{"gofmt -w .", "mix format", "prettier --write .", "npx prettier --write .", "ruff format ."} {
+		_, got := Validate(map[string]any{"fix": []any{command}}, InitContext{})
+		if len(got) != 0 {
+			t.Errorf("fix %q: %q", command, got)
+		}
+	}
+	for _, command := range []string{"go test ./...", "CI=1 npm test", "npx jest", "make test", "time go test ./..."} {
+		_, got := Validate(map[string]any{"checks": initCheckList("test", command)}, InitContext{})
+		if len(got) != 0 {
+			t.Errorf("check %q: %q", command, got)
 		}
 	}
 }

@@ -50,4 +50,3 @@ Feature: Keep tests and lint out of recurring setup
       | mix testing         | setup  |
       | python -m pytestfoo | setup  |
       | go test ./...       | checks |
-      | go test ./...       | fix    |

@@ -33,6 +33,9 @@ func TestInitValidateLongRunning(t *testing.T) {
 		t.Run("fix "+command, func(t *testing.T) {
 			_, problems := Validate(map[string]any{"fix": []any{command, "prettier --write ."}}, InitContext{})
 			want := []string{"fix command " + command + " does not exit on its own (watch or server mode); use a command that runs once"}
+			if command == "npx jest --watch" {
+				want = append([]string{"fix command " + command + " runs tests or linting; put it in checks"}, want...)
+			}
 			if !reflect.DeepEqual(problems, want) {
 				t.Fatalf("problems: %q", problems)
 			}

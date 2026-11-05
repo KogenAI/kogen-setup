@@ -44,7 +44,7 @@ func TestValidateUnsetVariables(t *testing.T) {
 					args = map[string]any{"checks": initCheckList("t", tc.command)}
 					label = func(string) string { return fmt.Sprintf("check t (%s)", tc.command) }
 				}
-				if role == "setup" && tc.command == "go test ./..." {
+				if role != "check" && tc.command == "go test ./..." {
 					return
 				}
 				var want []string

@@ -760,13 +760,8 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		}
 		for _, part := range initSetupPartsRE.Split(command, -1) {
 			part = strings.TrimSpace(part)
-			words := strings.Fields(part)
-			for _, suite := range []string{"mix test", "go test", "go vet", "npm test", "npm run test", "npm run lint", "yarn test", "pnpm test", "pytest", "python -m pytest", "cargo test", "cargo clippy", "bundle exec rspec", "rspec", "rake test"} {
-				prefix := strings.Fields(suite)
-				if len(words) >= len(prefix) && slices.Equal(words[:len(prefix)], prefix) {
-					problems = append(problems, "setup command "+part+" runs tests or linting; put it in checks")
-					break
-				}
+			if initRunsTests(part) {
+				problems = append(problems, "setup command "+part+" runs tests or linting; put it in checks")
 			}
 		}
 		if initNamesRoot(command, ctx.Root) {
@@ -802,6 +797,12 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		if initRunsNothing(command, true) {
 			problems = append(problems, "fix command "+command+" runs nothing")
 		}
+		for _, part := range initSetupPartsRE.Split(command, -1) {
+			part = strings.TrimSpace(part)
+			if initRunsTests(part) {
+				problems = append(problems, "fix command "+part+" runs tests or linting; put it in checks")
+			}
+		}
 		if initNamesRoot(command, ctx.Root) {
 			problems = append(problems, "fix command "+command+" names the project folder by absolute path; use a relative path")
 		}
@@ -827,6 +828,38 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		return InitProposal{}, problems
 	}
 	return InitProposal{Setup: setup, Fix: fix, Checks: checks, Protect: protect}, nil
+}
+
+var (
+	initAssignmentRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
+	initTestSuites   = []string{"mix test", "go test", "go vet", "npm test", "npm run test", "npm run lint", "yarn test", "pnpm test", "pytest", "python -m pytest", "cargo test", "cargo clippy", "bundle exec rspec", "rspec", "rake test", "make test", "make lint", "just test", "jest", "vitest", "eslint", "ruff", "tox", "mvn test", "gradle test", "dotnet test", "phpunit"}
+)
+
+// initRunsTests reports whether one command part runs tests or linting, also behind
+// leading NAME=value assignments and the wrappers npx, bunx, pnpm exec, yarn, env and time.
+func initRunsTests(part string) bool {
+	words := strings.Fields(part)
+	for len(words) > 0 {
+		for _, suite := range initTestSuites {
+			prefix := strings.Fields(suite)
+			if len(words) < len(prefix) || !slices.Equal(words[:len(prefix)], prefix) {
+				continue
+			}
+			if suite == "ruff" && len(words) > 1 && words[1] == "format" {
+				continue
+			}
+			return true
+		}
+		switch {
+		case initAssignmentRE.MatchString(words[0]), slices.Contains([]string{"npx", "bunx", "yarn", "env", "time"}, words[0]):
+			words = words[1:]
+		case len(words) >= 2 && words[0] == "pnpm" && words[1] == "exec":
+			words = words[2:]
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 // initMachinePrerequisite recognizes literal command words without running them.

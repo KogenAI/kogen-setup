@@ -3,6 +3,7 @@ package setup
 import (
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -28,11 +29,23 @@ func TestValidateCommandsOutsideProject(t *testing.T) {
 					args = map[string]any{"checks": initCheckList("test", tc.command)}
 					label = fmt.Sprintf("check test (%s)", tc.command)
 				}
-				// Setup commands that run tests have a separate existing validation rule.
-				if role == "setup" && (tc.command == "go test ./..." || tc.command == "cd .. && make test") {
+				runsTests := tc.command == "go test ./..." || tc.command == "cd .. && make test"
+				// Setup and fix commands that run tests have a separate existing validation rule.
+				if role == "setup" && runsTests {
 					return
 				}
 				proposal, problems := Validate(args, InitContext{})
+				if role == "fix" && runsTests {
+					part := strings.TrimPrefix(tc.command, "cd .. && ")
+					want := []string{"fix command " + part + " runs tests or linting; put it in checks"}
+					if tc.outside {
+						want = append(want, label+" reaches outside the project folder; use a path inside the project")
+					}
+					if !reflect.DeepEqual(problems, want) {
+						t.Fatalf("problems %v, want %v", problems, want)
+					}
+					return
+				}
 				if tc.outside {
 					want := []string{label + " reaches outside the project folder; use a path inside the project"}
 					if !reflect.DeepEqual(problems, want) || !reflect.DeepEqual(proposal, InitProposal{}) {
