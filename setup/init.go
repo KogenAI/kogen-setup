@@ -280,7 +280,7 @@ func initConfigure(ctx context.Context, s *sys.Session, in InitInput, repo *git.
 	if err := initCommittedCopy(s, repo, root, clone, tracked); err != nil {
 		return err
 	}
-	candidates, drops := initMerge(detected, proposed)
+	candidates := initMerge(detected, proposed)
 	res, err := initVerify(ctx, s, in, repo, clone, tracked, candidates, detected.Runner)
 	if err != nil {
 		return err
@@ -353,7 +353,7 @@ func initConfigure(ctx context.Context, s *sys.Session, in InitInput, repo *git.
 			s.Puts("Replaced: " + c.Name + " (" + c.Run + ") with (" + p.Run + ")")
 		}
 	}
-	for _, drop := range drops {
+	for _, drop := range res.drops {
 		s.Puts(drop)
 	}
 	s.Puts("Protect: " + initList(res.protect))
@@ -1366,11 +1366,35 @@ func initPackageVerification(text string, checks []project.Check) bool {
 // the detected ones; proposed setup entries and fixers follow the detected ones unless
 // already present; protect is the union; checks with the same command run once.
 func Merge(detected project.Detected, proposed InitProposal) InitProposal {
-	merged, _ := initMerge(detected, proposed)
+	merged := initMerge(detected, proposed)
+	merged.Fix, _ = initDropFixes(merged.Fix, merged.Setup, merged.Checks)
 	return merged
 }
 
-func initMerge(detected project.Detected, proposed InitProposal) (InitProposal, []string) {
+// initDropFixes splits fixers into those to run and the "Dropped:" lines for those that
+// repeat a command in setup or checks (setup wins when both match).
+func initDropFixes(fixes, setup []string, checks []project.Check) ([]string, []string) {
+	reasons := map[string]string{}
+	for _, c := range checks {
+		reasons[initCommandKey(c.Run)] = "checks"
+	}
+	for _, command := range setup {
+		reasons[initCommandKey(command)] = "setup"
+	}
+	kept := []string{}
+	var drops []string
+	for _, command := range fixes {
+		if reason, ok := reasons[initCommandKey(command)]; ok {
+			drops = append(drops, "Dropped: fix: "+command+" (already in "+reason+")")
+		} else {
+			kept = append(kept, command)
+		}
+	}
+	return kept, drops
+}
+
+// initMerge is Merge before any cross-list fix filtering.
+func initMerge(detected project.Detected, proposed InitProposal) InitProposal {
 	byName := map[string]project.Check{}
 	for _, c := range proposed.Checks {
 		byName[c.Name] = c
@@ -1398,29 +1422,12 @@ func initMerge(detected project.Detected, proposed InitProposal) (InitProposal, 
 			unique = append(unique, c)
 		}
 	}
-	setup := initUnion(detected.Setup, proposed.Setup)
-	reasons := map[string]string{}
-	for _, c := range unique {
-		reasons[initCommandKey(c.Run)] = "checks"
-	}
-	for _, command := range setup {
-		reasons[initCommandKey(command)] = "setup"
-	}
-	fix := []string{}
-	var drops []string
-	for _, command := range initUnion(detected.Fix, proposed.Fix) {
-		if reason, ok := reasons[initCommandKey(command)]; ok {
-			drops = append(drops, "Dropped: fix: "+command+" (already in "+reason+")")
-		} else {
-			fix = append(fix, command)
-		}
-	}
 	return InitProposal{
-		Setup:   setup,
-		Fix:     fix,
+		Setup:   initUnion(detected.Setup, proposed.Setup),
+		Fix:     initUnion(detected.Fix, proposed.Fix),
 		Checks:  unique,
 		Protect: initPathUnion(detected.Protect, proposed.Protect),
-	}, drops
+	}
 }
 
 // initCommandKey preserves quoted bytes while normalizing outside spaces and tabs.
@@ -1547,6 +1554,7 @@ type initResult struct {
 	how                 string
 	bridge              bool
 	leftOut             []string
+	drops               []string
 }
 
 // filterProtect rechecks proposed protection against the checks that survived verification.
@@ -1904,11 +1912,15 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 			return res, err
 		}
 	}
+	// A fixer that repeats a kept setup command or kept check is dropped, unrun; one that
+	// repeats only left-out commands is verified like any other fixer.
+	fixers, drops := initDropFixes(candidates.Fix, res.setup, res.checks)
+	res.drops = drops
 	// Fixers run last, so they cannot change which checks are kept. Each runs twice on
 	// the same tree and is kept only if its second run changes nothing more, and then only
 	// if every kept check still passes on the fixed tree (rerun once, in order, stopping at
 	// the first failure). A fixer that fails any of this is undone.
-	for i, cmd := range candidates.Fix {
+	for i, cmd := range fixers {
 		name := fmt.Sprintf("fix-%d", i+1)
 		err := func() error {
 			timeout, capped, ok := budget.limit()

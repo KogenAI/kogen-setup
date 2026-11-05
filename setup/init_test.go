@@ -2026,6 +2026,40 @@ func TestInitDropsRedundantFixBeforeVerification(t *testing.T) {
 	}
 }
 
+func TestInitVerifiesFixMatchingLeftOutCommand(t *testing.T) {
+	cases := []struct {
+		name, leftOut string
+		setup         []any
+		checks        any
+	}{
+		{"setup", "setup-1 (printf 'fixed\\n' > README.md) changed README.md", []any{"printf 'fixed\\n' > README.md"}, []any{}},
+		{"check", "tidy (printf 'fixed\\n' > README.md) changed README.md", []any{}, initCheckList("tidy", "printf 'fixed\\n' > README.md")},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := initNewFx(t, true, initSubmit(map[string]any{"setup": c.setup, "fix": []any{"printf 'fixed\\n' > README.md"}, "checks": c.checks, "protect": []any{}}))
+			f.write("README.md", "draft\n")
+			f.commitAll("fixture")
+			out, stderr := f.mustRun()
+			if got := f.config().Fix; !reflect.DeepEqual(got, []string{"printf 'fixed\\n' > README.md"}) {
+				t.Fatalf("fix = %q", got)
+			}
+			if got := f.config().Setup; len(got) != 0 {
+				t.Fatalf("setup = %q", got)
+			}
+			if strings.Contains(out, "Dropped:") {
+				t.Fatalf("fix reported as dropped: %s", out)
+			}
+			if !strings.Contains(out, "Left out: "+c.leftOut+"\n") {
+				t.Fatalf("missing left out %q: %s", c.leftOut, out)
+			}
+			if !strings.Contains(stderr, "kogen: running fix-1: ") {
+				t.Fatalf("fixer not verified: %s", stderr)
+			}
+		})
+	}
+}
+
 func TestInitMergeFixPreservesQuotedWhitespace(t *testing.T) {
 	got := Merge(project.Detected{}, InitProposal{Setup: []string{`printf 'a  b'`}, Fix: []string{`printf  'a  b'`, `printf 'a b'`}})
 	if !reflect.DeepEqual(got.Fix, []string{`printf 'a b'`}) {
