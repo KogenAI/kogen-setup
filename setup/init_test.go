@@ -253,6 +253,14 @@ func TestInitValidateShapes(t *testing.T) {
 		{"empty command", map[string]any{"checks": initCheckList("a", "  ")}, []string{"check a has no command"}},
 		{"dash edges", map[string]any{"checks": initCheckList("-a", "x", "a-", "x", "a--b", "x", "a-b", "x")},
 			[]string{"check name -a must be lowercase letters, digits and dashes", "check name a- must be lowercase letters, digits and dashes", "check name a--b must be lowercase letters, digits and dashes"}},
+		{"trailing newline name", map[string]any{"checks": initCheckList("lint\n", "make lint")},
+			[]string{`check name "lint\n" must be lowercase letters, digits and dashes`}},
+		{"tab name", map[string]any{"checks": initCheckList("lint\t", "make lint")},
+			[]string{`check name "lint\t" must be lowercase letters, digits and dashes`}},
+		{"trailing space name", map[string]any{"checks": initCheckList("lint ", "make lint")},
+			[]string{"check name lint  must be lowercase letters, digits and dashes"}},
+		{"newline variant of a proposed name", map[string]any{"checks": initCheckList("lint", "make lint", "lint\n", "make lint")},
+			[]string{`check name "lint\n" must be lowercase letters, digits and dashes`}},
 		{"invalid arguments", map[string]any{"__invalid__": true}, nil},
 	}
 	for _, c := range cases {

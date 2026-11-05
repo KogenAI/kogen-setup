@@ -55,7 +55,7 @@ var (
 	initSources          = []string{"README.md", "mix.exs", "package.json", "Makefile", ".tool-versions", ".gitlab-ci.yml"}
 	initManifestNames    = []string{"mix.exs", "package.json", "mix.lock", "package-lock.json", "npm-shrinkwrap.json", "go.mod", "go.sum"}
 	initWorkflowRE       = regexp.MustCompile(`^\.github/workflows/[^/]+\.ya?ml$`)
-	initCheckNameRE      = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*\n?$`)
+	initCheckNameRE      = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 	initSetupPartsRE     = regexp.MustCompile(`;|&&|\|\||\n`)
 	initCommandPartsRE   = regexp.MustCompile(`;|&&|\|\||\||\n`)
 	initNpmScriptRE      = regexp.MustCompile(`\bnpm\s+(?:run\s+)?([a-zA-Z0-9:_-]+)\b`)
@@ -1300,7 +1300,11 @@ func initChecks(args map[string]any) ([]project.Check, []string) {
 		case name == "acceptance" || name == "model":
 			problems = append(problems, "check name "+name+" is reserved")
 		case !initCheckNameRE.MatchString(name):
-			problems = append(problems, "check name "+name+" must be lowercase letters, digits and dashes")
+			shown := name
+			if strings.ContainsFunc(name, unicode.IsControl) {
+				shown = strconv.Quote(name)
+			}
+			problems = append(problems, "check name "+shown+" must be lowercase letters, digits and dashes")
 		case slices.ContainsFunc(checks, func(c project.Check) bool { return c.Name == name }):
 			problems = append(problems, "check name "+name+" is used twice")
 		case strings.TrimSpace(run) == "" && !strings.ContainsFunc(run, unicode.IsControl):
