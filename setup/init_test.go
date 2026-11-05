@@ -1288,7 +1288,8 @@ func TestInitCommitsTheConfigurationAFailedInitLeftBehind(t *testing.T) {
 	f.write("other.txt", "stays out\n")
 	f.write(".gitignore", "build")
 	out, _ := f.mustRun()
-	initWantLines(t, out, "Initialized Kogen in "+f.repo, "Commit: {sha8} Add Kogen configuration")
+	initWantLines(t, out, "Initialized Kogen in "+f.repo, "Commit: {sha8} Add Kogen configuration",
+		"Note: check test (true) cannot fail: runs nothing")
 	if got := f.commitFiles(); !reflect.DeepEqual(got, []string{".gitignore", ".kogen/models.yaml", ".kogen/project.yaml", "features/steps/README.md"}) {
 		t.Fatalf("commit files %v", got)
 	}
@@ -1298,6 +1299,81 @@ func TestInitCommitsTheConfigurationAFailedInitLeftBehind(t *testing.T) {
 	if st := f.dirtyPaths(); st != "?? other.txt\n" || len(f.requests()) != 0 {
 		t.Fatalf("status %q", st)
 	}
+}
+
+func TestInitAlreadyInitializedReportsUndetectedChecks(t *testing.T) {
+	parallel(t)
+	const goMod = "module example.com/fixture\n\ngo 1.22\n"
+	const format = "Note: detected check go-format (test -z \"$(gofmt -l .)\") is not in the configured checks"
+	const test = "Note: detected check go-test (go test ./...) is not in the configured checks"
+	const build = "Note: detected check go-build (go build -o /dev/null ./...) is not in the configured checks"
+	checks := func(pairs ...string) string {
+		cfg := "version: 1\ncommands:\n  setup: []\n  checks:\n"
+		if len(pairs) == 0 {
+			return "version: 1\ncommands:\n  setup: []\n  checks: []\n"
+		}
+		for i := 0; i < len(pairs); i += 2 {
+			cfg += "    - name: " + pairs[i] + "\n      run: '" + pairs[i+1] + "'\n"
+		}
+		return cfg
+	}
+	cases := []struct {
+		name   string
+		file   string
+		text   string
+		config string
+		want   []string
+	}{
+		{"vet only", "go.mod", goMod, checks("vet", "go vet ./..."), []string{format, test, build, initNextAcceptance}},
+		{"test under another name", "go.mod", goMod, checks("vet", "go vet ./...", "unit", "go test ./..."), []string{format, build, initNextAcceptance}},
+		{"extra spaces", "go.mod", goMod, checks("vet", "go vet ./...", "suite", "go   test    ./..."), []string{format, build, initNextAcceptance}},
+		{"same name, different command", "go.mod", goMod, checks("vet", "go vet ./...", "go-test", "GOFLAGS=-trimpath go test ./..."), []string{format, test, build, initNextAcceptance}},
+		{"no checks, detected test", "package.json", "{\"name\": \"fixture\", \"scripts\": {\"test\": \"node test.js\"}}\n", checks(),
+			[]string{"Note: detected check test (npm run test) is not in the configured checks", initNextAcceptance, initNextChecks}},
+		{"covering every detected check", "go.mod", goMod,
+			checks("format", "test -z \"$(gofmt -l .)\"", "test", "go test ./...", "vet", "go vet ./...", "build", "go build -o /dev/null ./..."),
+			[]string{initNextAcceptance}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			parallel(t)
+			f := initNewFx(t, false)
+			f.write(c.file, c.text)
+			f.write("README.md", "x\n")
+			f.write(".kogen/project.yaml", c.config)
+			f.commitAll("configured")
+			head := f.head()
+			out, _ := f.mustRun()
+			initWantLines(t, out, append([]string{"Kogen is already initialized in " + f.repo}, c.want...)...)
+			if f.head() != head || f.dirtyPaths() != "" || len(f.requests()) != 0 {
+				t.Fatalf("head %s -> %s, status %q", head, f.head(), f.dirtyPaths())
+			}
+		})
+	}
+}
+
+func TestInitLeftoverCommitReportsConfigurationNotes(t *testing.T) {
+	parallel(t)
+	f := initNewFx(t, false)
+	f.write("go.mod", "module example.com/fixture\n\ngo 1.22\n")
+	f.write("README.md", "x\n")
+	f.commitAll("a")
+	f.write(".kogen/project.yaml", "version: 1\ncommands:\n  setup:\n    - mix local.hex --force\n  checks:\n    - name: vet\n      run: go vet ./...\n    - name: smoke\n      run: 'true'\n    - name: lint\n      run: npm test || true\n")
+	notes := []string{
+		"Note: setup command (mix local.hex --force) looks like a one-time machine bootstrap",
+		"Note: check smoke (true) cannot fail: runs nothing",
+		"Note: check lint (npm test || true) cannot fail: masks its failure",
+		"Note: detected check go-format (test -z \"$(gofmt -l .)\") is not in the configured checks",
+		"Note: detected check go-test (go test ./...) is not in the configured checks",
+		"Note: detected check go-build (go build -o /dev/null ./...) is not in the configured checks",
+	}
+	out, _ := f.mustRun()
+	initWantLines(t, out, append(append([]string{"Initialized Kogen in " + f.repo, "Commit: {sha8} Add Kogen configuration"}, notes...), initNextAcceptance)...)
+	if f.dirtyPaths() != "" || len(f.requests()) != 0 {
+		t.Fatalf("status %q", f.dirtyPaths())
+	}
+	again, _ := f.mustRun()
+	initWantLines(t, again, append(append([]string{"Kogen is already initialized in " + f.repo}, notes...), initNextAcceptance)...)
 }
 
 func TestInitLeftoverConfigurationMustBeValid(t *testing.T) {

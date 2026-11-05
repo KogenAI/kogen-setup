@@ -143,21 +143,8 @@ func initRun(ctx context.Context, s *sys.Session, in InitInput) error {
 				return err
 			}
 			s.Puts("Kogen is already initialized in " + root)
-			for _, command := range cfg.Setup {
-				if initMachinePrerequisite(command) || initPublishesOrDeploys(command) {
-					s.Puts("Note: setup command (" + command + ") looks like a one-time machine bootstrap")
-				}
-			}
-			for _, c := range cfg.Checks {
-				reason := ""
-				if initRunsNothing(c.Run, true) {
-					reason = "runs nothing"
-				} else if initMasksFailure(c.Run) {
-					reason = "masks its failure"
-				}
-				if reason != "" {
-					s.Puts("Note: check " + c.Name + " (" + c.Run + ") cannot fail: " + reason)
-				}
+			if err := initAcceptedNotes(s, repo, cfg); err != nil {
+				return err
 			}
 			initNextLines(s, cfg)
 			return nil
@@ -245,8 +232,71 @@ func initCommitLeftover(s *sys.Session, repo *git.Repo, root, head string, dirty
 	if err != nil {
 		return err
 	}
+	if err := initAcceptedNotes(s, repo, cfg); err != nil {
+		return err
+	}
 	initNextLines(s, cfg)
 	return nil
+}
+
+// initAcceptedNotes prints what an accepted configuration gets wrong or leaves out: bootstrap
+// setup commands, checks that cannot fail, then detected checks no configured check runs.
+// Detection reads the committed tree, so the leftover path calls it after its commit.
+func initAcceptedNotes(s *sys.Session, repo *git.Repo, cfg *project.Config) error {
+	for _, command := range cfg.Setup {
+		if initMachinePrerequisite(command) || initPublishesOrDeploys(command) {
+			s.Puts("Note: setup command (" + command + ") looks like a one-time machine bootstrap")
+		}
+	}
+	for _, c := range cfg.Checks {
+		reason := ""
+		if initRunsNothing(c.Run, true) {
+			reason = "runs nothing"
+		} else if initMasksFailure(c.Run) {
+			reason = "masks its failure"
+		}
+		if reason != "" {
+			s.Puts("Note: check " + c.Name + " (" + c.Run + ") cannot fail: " + reason)
+		}
+	}
+	tracked, manifests, err := initTrackedManifests(repo, repo.Head())
+	if err != nil {
+		return err
+	}
+	configured := map[string]bool{}
+	for _, c := range cfg.Checks {
+		configured[initCommandKey(c.Run)] = true
+	}
+	for _, d := range project.Detect(manifests, tracked).Checks {
+		if !configured[initCommandKey(d.Run)] {
+			s.Puts("Note: detected check " + d.Name + " (" + d.Run + ") is not in the configured checks")
+		}
+	}
+	return nil
+}
+
+// initTrackedManifests lists the paths tracked at HEAD and reads the manifests among them,
+// keyed by their full path: the inputs of project detection.
+func initTrackedManifests(repo *git.Repo, head string) ([]string, map[string]string, error) {
+	listing, err := repo.OK("ls-tree", "-r", "-z", "--name-only", "HEAD")
+	if err != nil {
+		return nil, nil, err
+	}
+	var tracked []string
+	for _, p := range strings.Split(listing, "\x00") {
+		if p != "" {
+			tracked = append(tracked, p)
+		}
+	}
+	manifests := map[string]string{}
+	for _, p := range tracked {
+		if slices.Contains(initManifestNames, path.Base(p)) {
+			if text, ok := repo.Show(head, p); ok {
+				manifests[p] = text
+			}
+		}
+	}
+	return tracked, manifests, nil
 }
 
 func initConfigure(ctx context.Context, s *sys.Session, in InitInput, repo *git.Repo, root, head string, modelsExist bool) error {
@@ -259,26 +309,15 @@ func initConfigure(ctx context.Context, s *sys.Session, in InitInput, repo *git.
 		return err
 	}
 	s.Progress("kogen: detecting the project's commands")
-	listing, err := repo.OK("ls-tree", "-r", "-z", "--name-only", "HEAD")
+	tracked, manifests, err := initTrackedManifests(repo, head)
 	if err != nil {
 		return err
 	}
-	var tracked []string
-	for _, p := range strings.Split(listing, "\x00") {
-		if p != "" {
-			tracked = append(tracked, p)
-		}
-	}
-	sources, manifests := map[string]string{}, map[string]string{}
+	sources := map[string]string{}
 	for _, p := range tracked {
 		if slices.Contains(initSources, p) || initWorkflowRE.MatchString(p) {
 			if text, ok := repo.Show(head, p); ok {
 				sources[p] = text
-			}
-		}
-		if slices.Contains(initManifestNames, path.Base(p)) {
-			if text, ok := repo.Show(head, p); ok {
-				manifests[p] = text
 			}
 		}
 	}
