@@ -122,3 +122,101 @@ func TestIntegrityRestoreExistingFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestInitFailedWriteRemovesNewDirectories(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		preDir  bool
+		wantDir bool
+	}{{"no .kogen before", false, false}, {"empty .kogen before", true, true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := initNewFx(t, true, initNothing())
+			f.write("README.md", "# fixture\n")
+			f.commitAll("initial")
+			f.write(".git/info/exclude", ".gitignore\n")
+			missing := filepath.Join(filepath.Dir(f.repo), "missing", "gitignore")
+			if err := os.Symlink(missing, filepath.Join(f.repo, ".gitignore")); err != nil {
+				t.Fatal(err)
+			}
+			if tc.preDir {
+				if err := os.Mkdir(filepath.Join(f.repo, ".kogen"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			head := f.head()
+			exit, out, _, err := f.run("")
+			if exit != 70 || err == nil || !strings.Contains(err.Error(), ".gitignore") || strings.Contains(err.Error(), "restoring files") {
+				t.Fatalf("exit %d err %v", exit, err)
+			}
+			if strings.Contains(out, "Initialized Kogen") {
+				t.Fatalf("output %q", out)
+			}
+			if f.exists(project.ConfigPath) {
+				t.Fatal("project.yaml left behind")
+			}
+			if got := f.exists(".kogen"); got != tc.wantDir {
+				t.Fatalf(".kogen exists %v, want %v", got, tc.wantDir)
+			}
+			if s := f.dirtyPaths(); s != "" {
+				t.Fatalf("status %q", s)
+			}
+			if f.head() != head {
+				t.Fatal("HEAD changed")
+			}
+		})
+	}
+}
+
+func TestIntegrityRestoreNewDirectories(t *testing.T) {
+	for _, keep := range []bool{false, true} {
+		root := t.TempDir()
+		saved, err := initSnapshot(root, []string{"features/steps/README.md"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		dir := filepath.Join(root, "features", "steps")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if keep {
+			if err := os.WriteFile(filepath.Join(root, "features", "other"), []byte("y"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := initRestore(root, saved); err != nil {
+			t.Fatalf("keep %v: %v", keep, err)
+		}
+		if _, err := os.Stat(dir); !os.IsNotExist(err) {
+			t.Fatalf("keep %v: features/steps remains: %v", keep, err)
+		}
+		if _, err := os.Stat(filepath.Join(root, "features")); keep != (err == nil) {
+			t.Fatalf("keep %v: features: %v", keep, err)
+		}
+		_, err = os.Stat(filepath.Join(root, "features", "other"))
+		if keep != (err == nil) {
+			t.Fatalf("keep %v: other: %v", keep, err)
+		}
+		if err := initRestore(root, saved); err != nil {
+			t.Fatalf("second restore: %v", err)
+		}
+	}
+	// A dangling symlink in place of a directory existed before the snapshot and stays.
+	root := t.TempDir()
+	link := filepath.Join(root, ".kogen")
+	if err := os.Symlink(filepath.Join(root, "missing"), link); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := initSnapshot(root, []string{project.ConfigPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := initRestore(root, saved); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(link); err != nil {
+		t.Fatalf("dangling .kogen symlink removed: %v", err)
+	}
+}

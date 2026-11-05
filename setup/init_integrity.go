@@ -1,9 +1,13 @@
 package setup
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
+	"syscall"
 
 	"github.com/KogenAI/kogen-coordinator/project"
 )
@@ -13,10 +17,23 @@ type initIntegrityFile struct {
 	data   []byte
 	mode   os.FileMode
 	exists bool
+	dir    bool // a directory that did not exist when the snapshot was taken
 }
 
 func initSnapshot(root string, paths []string) ([]initIntegrityFile, error) {
 	var saved []initIntegrityFile
+	var dirs []initIntegrityFile
+	seen := map[string]bool{}
+	for _, p := range paths {
+		for d := filepath.Dir(p); d != "." && d != string(filepath.Separator) && !seen[d]; d = filepath.Dir(d) {
+			seen[d] = true
+			if _, err := os.Lstat(filepath.Join(root, d)); os.IsNotExist(err) {
+				dirs = append(dirs, initIntegrityFile{path: d, dir: true})
+			} else if err != nil {
+				return nil, err
+			}
+		}
+	}
 	for _, p := range paths {
 		name := filepath.Join(root, p)
 		info, err := os.Stat(name)
@@ -31,13 +48,18 @@ func initSnapshot(root string, paths []string) ([]initIntegrityFile, error) {
 		if err != nil {
 			return nil, err
 		}
-		saved = append(saved, initIntegrityFile{p, data, info.Mode(), true})
+		saved = append(saved, initIntegrityFile{p, data, info.Mode(), true, false})
 	}
-	return saved, nil
+	return append(saved, dirs...), nil
 }
 func initRestore(root string, saved []initIntegrityFile) error {
 	var first error
+	var dirs []string
 	for _, f := range saved {
+		if f.dir {
+			dirs = append(dirs, f.path)
+			continue
+		}
 		name := filepath.Join(root, f.path)
 		var err error
 		if f.exists {
@@ -52,6 +74,17 @@ func initRestore(root string, saved []initIntegrityFile) error {
 			}
 		}
 		if err != nil && first == nil {
+			first = err
+		}
+	}
+	// Remove the directories the snapshot found missing, deepest first. One that
+	// still holds other content stays.
+	sort.Slice(dirs, func(i, j int) bool {
+		return strings.Count(dirs[i], string(filepath.Separator)) > strings.Count(dirs[j], string(filepath.Separator))
+	})
+	for _, d := range dirs {
+		err := os.Remove(filepath.Join(root, d))
+		if err != nil && !os.IsNotExist(err) && !errors.Is(err, syscall.ENOTEMPTY) && !errors.Is(err, syscall.EEXIST) && first == nil {
 			first = err
 		}
 	}
