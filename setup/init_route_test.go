@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/KogenAI/kogen-coordinator/project"
+	"github.com/KogenAI/kogen-executor/executor"
 	"github.com/KogenAI/kogen-loop/provider"
 	"github.com/KogenAI/kogen-loop/sys"
 )
@@ -117,5 +118,28 @@ func TestInitRenderKeepsCommandsContainingModelsHeader(t *testing.T) {
 	want := strings.TrimSuffix(project.RenderConfig(cfg), project.ModelsTemplate())
 	if text != want || !strings.Contains(text, "models:") {
 		t.Fatalf("command changed: %s", text)
+	}
+}
+
+func TestInitClaudeUsageLine(t *testing.T) {
+	parallel(t)
+	n := func(v int) *int { return &v }
+	round := func(in, cached, out int) executor.Usage {
+		return executor.Usage{Input: n(in), Cached: n(cached), Output: n(out)}
+	}
+	for name, tc := range map[string]struct {
+		rounds []executor.Usage
+		want   string
+	}{
+		"one complete round":  {[]executor.Usage{round(100, 40, 10)}, "input=100 cached=40 output=10 reasoning=0"},
+		"two complete rounds": {[]executor.Usage{round(100, 40, 10), round(50, 50, 5)}, "input=150 cached=90 output=15 reasoning=0"},
+		"reported reasoning":  {[]executor.Usage{{Input: n(10), Cached: n(0), Output: n(5), Reasoning: n(3)}, round(1, 1, 1)}, "input=11 cached=1 output=6 reasoning=3"},
+		"no usage":            {[]executor.Usage{{}}, "usage=unknown"},
+		"complete then none":  {[]executor.Usage{round(100, 40, 10), {}}, "usage=unknown"},
+		"nil cached":          {[]executor.Usage{{Input: n(100), Output: n(10)}}, "usage=unknown"},
+	} {
+		if got := initClaudeUsageLine(tc.rounds); got != tc.want {
+			t.Errorf("%s: %q, want %q", name, got, tc.want)
+		}
 	}
 }

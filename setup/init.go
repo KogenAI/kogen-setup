@@ -25,6 +25,7 @@ import (
 	"github.com/KogenAI/kogen-coordinator/git"
 	"github.com/KogenAI/kogen-coordinator/project"
 	"github.com/KogenAI/kogen-executor/agent"
+	"github.com/KogenAI/kogen-executor/executor"
 	"github.com/KogenAI/kogen-loop/provider"
 	"github.com/KogenAI/kogen-loop/sys"
 	"github.com/KogenAI/kogen-loop/tools"
@@ -443,11 +444,14 @@ func initAsk(ctx context.Context, s *sys.Session, in InitInput, route initRoute,
 	}
 	ctxInfo := InitContext{Root: root, Tracked: tracked, Contents: manifests, DetectedChecks: detected.Checks, Env: env}
 	var proposal InitProposal
-	var usage provider.Usage
+	var usageLine string
 	var err error
 	if role.External() {
-		proposal, err = initClaudeConverse(ctx, s, home, role, input, ctxInfo)
+		var rounds []executor.Usage
+		proposal, rounds, err = initClaudeConverse(ctx, s, home, role, input, ctxInfo)
+		usageLine = initClaudeUsageLine(rounds)
 	} else {
+		var usage provider.Usage
 		// The provider client reads credentials from the session HOME. Honor InitInput.Home
 		// for the request as well as route selection, without changing the caller's session.
 		requestSession := sys.NewWith(append(slices.Clone(s.Env), "HOME="+home), s.Cwd)
@@ -460,11 +464,17 @@ func initAsk(ctx context.Context, s *sys.Session, in InitInput, route initRoute,
 		if interrupted := s.Err(); interrupted != nil {
 			return InitProposal{}, interrupted
 		}
+		usageLine = usage.Line()
 	}
+	if err != nil {
+		if e, ok := sys.AsError(err); !ok || e.Class != "provider" || e.Reason != "init_invalid" {
+			return InitProposal{}, err
+		}
+	}
+	s.Progress(fmt.Sprintf("kogen: init %s/%s %s wall_ms=%d", role.Model, role.Effort, usageLine, time.Since(t0).Milliseconds()))
 	if err != nil {
 		return InitProposal{}, err
 	}
-	s.Progress(fmt.Sprintf("kogen: init %s/%s %s wall_ms=%d", role.Model, role.Effort, usage.Line(), time.Since(t0).Milliseconds()))
 	return proposal, nil
 }
 

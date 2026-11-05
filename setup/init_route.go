@@ -115,44 +115,64 @@ func initRenderModels(route initRoute) string {
 	return b.String()
 }
 
-func initClaudeConverse(ctx context.Context, s *sys.Session, home string, role project.Role, input []any, vctx InitContext) (InitProposal, error) {
+func initClaudeConverse(ctx context.Context, s *sys.Session, home string, role project.Role, input []any, vctx InitContext) (InitProposal, []executor.Usage, error) {
 	token, _ := provider.ClaudeCodeToken(home)
 	exe, err := os.Executable()
 	if err != nil {
-		return InitProposal{}, err
+		return InitProposal{}, nil, err
 	}
 	dir, err := os.MkdirTemp("", "kogen-init-executor-")
 	if err != nil {
-		return InitProposal{}, err
+		return InitProposal{}, nil, err
 	}
 	defer os.RemoveAll(dir)
 	schema, err := json.Marshal(submitConfigurationDef()["parameters"])
 	if err != nil {
-		return InitProposal{}, err
+		return InitProposal{}, nil, err
 	}
 	a := claudecode.New(claudecode.Options{Home: home, Env: s.Env, Stderr: s.Stderr, Token: token, HookCommand: []string{exe, claudecode.HookSubcommand}})
 	body, _ := json.Marshal(input)
 	session, err := a.Start(ctx, executor.Task{Role: executor.RoleShape, Root: s.Cwd, Home: home, Dir: dir, Model: role.Model, Effort: role.Effort, Schema: schema, Brief: executor.Brief{Stable: InitInstructions(), Dynamic: string(body)}}, nil)
 	if err != nil {
-		return InitProposal{}, err
+		return InitProposal{}, nil, err
 	}
 	defer session.Close()
+	var rounds []executor.Usage
 	feedback := ""
 	for attempt := 0; attempt < 2; attempt++ {
 		result, err := session.Round(ctx, executor.Input{Feedback: feedback})
 		if err != nil {
-			return InitProposal{}, err
+			return InitProposal{}, nil, err
 		}
+		rounds = append(rounds, result.Usage)
 		var args map[string]any
 		if json.Unmarshal(result.Structured, &args) == nil && args != nil {
 			proposal, problems := Validate(args, vctx)
 			if len(problems) == 0 {
-				return proposal, nil
+				return proposal, rounds, nil
 			}
 			feedback = "invalid: " + strings.Join(problems, "; ")
 		} else {
 			feedback = "Answer with a valid configuration."
 		}
 	}
-	return InitProposal{}, sys.Fail("provider", "init_invalid", "the model did not return a valid configuration; nothing was written", 4)
+	return InitProposal{}, rounds, sys.Fail("provider", "init_invalid", "the model did not return a valid configuration; nothing was written", 4)
+}
+
+// initClaudeUsageLine is the progress counters for the rounds that ran: their sum in the
+// provider.Usage.Line format, or usage=unknown when any round lacks Input, Cached or Output.
+// Claude Code reports no reasoning, so a nil Reasoning counts as 0.
+func initClaudeUsageLine(rounds []executor.Usage) string {
+	var sum provider.Usage
+	for _, u := range rounds {
+		if u.Input == nil || u.Cached == nil || u.Output == nil {
+			return "usage=unknown"
+		}
+		r := provider.Usage{Input: *u.Input, Cached: *u.Cached, Output: *u.Output}
+		if u.Reasoning != nil {
+			r.Reasoning = *u.Reasoning
+		}
+		sum = sum.Add(r)
+	}
+	return sum.Line()
 }

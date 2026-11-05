@@ -1190,6 +1190,9 @@ func TestInitTwoInvalidAnswersEndWithNothingWritten(t *testing.T) {
 			if f.out.String() != "" {
 				t.Fatalf("stdout %q", f.out.String())
 			}
+			if !strings.Contains(f.err.String(), "kogen: init gpt-6.1-sol/high input=200 cached=0 output=40 reasoning=10 wall_ms=") {
+				t.Fatalf("stderr lacks the usage line:\n%s", f.err.String())
+			}
 		})
 	}
 }
