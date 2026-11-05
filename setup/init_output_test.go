@@ -36,10 +36,37 @@ func TestInitOutputTail(t *testing.T) {
 		want  []string
 	}{
 		{"", nil}, {"one\n", []string{"  | one"}}, {"one\n\ntwo\n", []string{"  | one", "  | ", "  | two"}}, {"\n", []string{"  | "}},
+		{"\x1b[31mred boom\x1b[0m\n", []string{"  | red boom"}},
+		{"ok\x1b[K done\n", []string{"  | ok done"}},
+		{"\x1b]0;title\x07shown\n", []string{"  | shown"}},
+		{"\x1b]2;t\x1b\\kept\n", []string{"  | kept"}},
+		{"a\x1b[31\n", []string{"  | a"}},
+		{"a\x1b]0;open\n", []string{"  | a"}},
+		{"one\rtwo\n", []string{"  | two"}},
+		{"FAIL foo\r\n", []string{"  | FAIL foo"}},
+		{"10%\r20%\r\n", []string{"  | 20%"}},
+		{"\r\n", []string{"  | "}},
+		{"a\x07b\n", []string{"  | ab"}},
+		{"x\x01y\tz\x7fw\u009bv\n", []string{"  | xy\tzwv"}},
+		{"\x1b(Bx\n", []string{"  | (Bx"}},
+		{"\x1b[31m" + strings.Repeat("界", 200), []string{"  | " + strings.Repeat("界", 200)}},
+		{"\x1b[31m" + strings.Repeat("界", 201), []string{"  | " + strings.Repeat("界", 200)}},
 	} {
 		if got := initOutputTail(tc.input); !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("%q: %q want %q", tc.input, got, tc.want)
 		}
+	}
+}
+
+func TestInitOutputTailCountsLinesBeforeCleaning(t *testing.T) {
+	input := []string{"\x1b[31mfirst"}
+	want := []string{}
+	for i := 1; i <= 20; i++ {
+		input = append(input, fmt.Sprint(i))
+		want = append(want, fmt.Sprintf("  | %d", i))
+	}
+	if got := initOutputTail(strings.Join(input, "\n") + "\n"); !reflect.DeepEqual(got, want) {
+		t.Errorf("%q, want %q", got, want)
 	}
 }
 

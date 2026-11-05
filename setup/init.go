@@ -1723,13 +1723,58 @@ func initOutputTail(output string) []string {
 		lines = lines[len(lines)-20:]
 	}
 	for i, line := range lines {
-		chars := []rune(line)
+		chars := initCleanOutputLine([]rune(line))
 		if len(chars) > 200 {
 			chars = chars[:200]
 		}
 		lines[i] = "  | " + string(chars)
 	}
 	return lines
+}
+
+// initCleanOutputLine removes what could alter the terminal or the "  | " marker from
+// one output line: ANSI CSI and OSC sequences, everything before the last carriage
+// return and every other control character except tab.
+func initCleanOutputLine(line []rune) []rune {
+	var kept []rune
+	for i := 0; i < len(line); i++ {
+		r := line[i]
+		if r != 0x1b || i+1 >= len(line) || (line[i+1] != '[' && line[i+1] != ']') {
+			kept = append(kept, r)
+			continue
+		}
+		osc := line[i+1] == ']'
+		i += 2
+		for ; i < len(line); i++ {
+			if osc {
+				if line[i] == 0x07 {
+					break
+				}
+				if line[i] == 0x1b && i+1 < len(line) && line[i+1] == '\\' {
+					i++
+					break
+				}
+			} else if line[i] >= 0x40 && line[i] <= 0x7e {
+				break
+			}
+		}
+	}
+	for len(kept) > 0 && kept[len(kept)-1] == '\r' {
+		kept = kept[:len(kept)-1]
+	}
+	for i := len(kept) - 1; i >= 0; i-- {
+		if kept[i] == '\r' {
+			kept = kept[i+1:]
+			break
+		}
+	}
+	out := kept[:0]
+	for _, r := range kept {
+		if r == '\t' || !unicode.IsControl(r) {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 func initShowOutput(s *sys.Session, output string) {
