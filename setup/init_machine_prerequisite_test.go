@@ -49,13 +49,21 @@ func TestValidateMachinePrerequisites(t *testing.T) {
 }
 
 func TestValidateSetupControlCharacters(t *testing.T) {
-	for _, command := range []string{"echo ready\n", "npm install -g x\t"} {
+	for _, command := range []string{"echo ready\n"} {
 		_, problems := Validate(map[string]any{"setup": []string{command}}, InitContext{})
 		if len(problems) != 1 || !strings.Contains(problems[0], "contains a control character") {
 			t.Fatalf("%q: %q", command, problems)
 		}
 	}
-	_, problems := Validate(map[string]any{"setup": []string{""}}, InitContext{})
+	_, problems := Validate(map[string]any{"setup": []string{"npm install -g x\t"}}, InitContext{})
+	if len(problems) != 1 || problems[0] != "setup command npm install -g x\t is a one-time machine prerequisite, not recurring project setup" {
+		t.Fatalf("tab: %q", problems)
+	}
+	_, problems = Validate(map[string]any{"setup": []string{"\t"}}, InitContext{})
+	if len(problems) != 1 || problems[0] != "setup must be a list of non-empty commands" {
+		t.Fatalf("tab only: %q", problems)
+	}
+	_, problems = Validate(map[string]any{"setup": []string{""}}, InitContext{})
 	if len(problems) != 1 || problems[0] != "setup must be a list of non-empty commands" {
 		t.Fatalf("empty: %q", problems)
 	}

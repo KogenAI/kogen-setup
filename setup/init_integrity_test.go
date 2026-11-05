@@ -11,9 +11,9 @@ import (
 
 func TestValidateCommandControls(t *testing.T) {
 	cases := []struct{ role, command, label string }{
-		{"setup", "set -e\nnpm ci", "setup entry 1"}, {"checks", "mix\ttest", "check test"},
-		{"checks", "mix test\r", "check test"}, {"fix", "mix format\t", "fix entry 1"}, {"setup", "npm ci\x7f", "setup entry 1"},
-		{"setup", "\n", "setup entry 1"}, {"fix", "\t", "fix entry 1"}, {"checks", "\r", "check test"},
+		{"setup", "set -e\nnpm ci", "setup entry 1"}, {"checks", "mix test\a", "check test"},
+		{"checks", "mix test\r", "check test"}, {"fix", "mix format\r", "fix entry 1"}, {"setup", "npm ci\x7f", "setup entry 1"},
+		{"setup", "\n", "setup entry 1"}, {"fix", "mix format\a", "fix entry 1"}, {"checks", "\r", "check test"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.label+tc.command, func(t *testing.T) {
@@ -30,6 +30,38 @@ func TestValidateCommandControls(t *testing.T) {
 	}
 	if _, p := Validate(map[string]any{"setup": []any{"set -e", "npm ci"}}, InitContext{}); len(p) != 0 {
 		t.Fatal(p)
+	}
+}
+
+func TestValidateCommandTabs(t *testing.T) {
+	run := "printf 'a\tb\\n' | cut -f2"
+	got, problems := Validate(map[string]any{"setup": []any{"mix\tdeps.get"}, "fix": []any{"mix\tformat"}, "checks": initCheckList("cols", run)}, InitContext{})
+	if len(problems) != 0 {
+		t.Fatal(problems)
+	}
+	if got.Setup[0] != "mix\tdeps.get" || got.Fix[0] != "mix\tformat" || got.Checks[0].Run != run {
+		t.Fatalf("changed: %+v", got)
+	}
+	for role, want := range map[string]string{"setup": "setup must be a list of non-empty commands", "fix": "fix must be a list of non-empty commands"} {
+		for _, command := range []string{"\t", " \t "} {
+			if _, p := Validate(map[string]any{role: []any{command}}, InitContext{}); len(p) != 1 || p[0] != want {
+				t.Fatalf("%s %q: %q", role, command, p)
+			}
+		}
+	}
+	if _, p := Validate(map[string]any{"checks": initCheckList("test", "\t")}, InitContext{}); len(p) != 1 || p[0] != "check test has no command" {
+		t.Fatal(p)
+	}
+}
+
+func TestInitWritesTabCheckAndReadsItBack(t *testing.T) {
+	run := "printf 'a\tb\\n' | cut -f2"
+	f := initNewFx(t, true, initSubmit(map[string]any{"setup": []any{}, "fix": []any{}, "checks": initCheckList("cols", run), "protect": []any{}}))
+	f.write("README.md", "notes\n")
+	f.commitAll("notes")
+	f.mustRun()
+	if checks := f.config().Checks; len(checks) != 1 || checks[0].Name != "cols" || checks[0].Run != run {
+		t.Fatalf("checks: %+v", checks)
 	}
 }
 

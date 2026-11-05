@@ -684,7 +684,7 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 			problems = append(problems, "check command "+redacted+" contains a credential literal; read it from the environment instead")
 			continue
 		}
-		if strings.ContainsFunc(c.Run, unicode.IsControl) {
+		if strings.ContainsFunc(c.Run, initControlNotTab) {
 			problems = append(problems, fmt.Sprintf("check %s command %q contains a control character; put one command per entry", c.Name, c.Run))
 			if initInstallsDependencies(c.Run) {
 				problems = append(problems, fmt.Sprintf("check %s (%s) installs dependencies; put the install in setup", c.Name, c.Run))
@@ -741,11 +741,11 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 			problems = append(problems, "setup command "+redacted+" contains a credential literal; read it from the environment instead")
 			continue
 		}
-		prerequisite := (!strings.ContainsFunc(command, unicode.IsControl) || strings.Contains(command, "\n")) && initMachinePrerequisite(command)
+		prerequisite := (!strings.ContainsFunc(command, initControlNotTab) || strings.Contains(command, "\n")) && initMachinePrerequisite(command)
 		if prerequisite {
 			problems = append(problems, "setup command "+command+" is a one-time machine prerequisite, not recurring project setup")
 		}
-		if strings.ContainsFunc(command, unicode.IsControl) {
+		if strings.ContainsFunc(command, initControlNotTab) {
 			if prerequisite {
 				continue
 			}
@@ -795,7 +795,7 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 			problems = append(problems, "fix command "+redacted+" contains a credential literal; read it from the environment instead")
 			continue
 		}
-		if strings.ContainsFunc(command, unicode.IsControl) {
+		if strings.ContainsFunc(command, initControlNotTab) {
 			problems = append(problems, fmt.Sprintf("fix entry %d command %q contains a control character; put one command per entry", i+1, command))
 			continue
 		}
@@ -1245,6 +1245,12 @@ func initRunsNothing(command string, printIsNothing bool) bool {
 	return quote == 0 && validCommand()
 }
 
+// initControlNotTab reports a control character other than the horizontal
+// tab, which is ordinary whitespace inside a one-line command.
+func initControlNotTab(r rune) bool {
+	return r != '\t' && unicode.IsControl(r)
+}
+
 func initStrings(args map[string]any, key string) ([]string, string) {
 	v, present := args[key]
 	if !present {
@@ -1264,7 +1270,7 @@ func initStrings(args map[string]any, key string) ([]string, string) {
 	out := make([]string, 0, len(items))
 	for _, it := range items {
 		str, ok := it.(string)
-		if !ok || (strings.TrimSpace(str) == "" && !strings.ContainsFunc(str, unicode.IsControl)) {
+		if !ok || (strings.TrimSpace(str) == "" && !strings.ContainsFunc(str, initControlNotTab)) {
 			return nil, key + " must be a list of non-empty commands"
 		}
 		out = append(out, str)
@@ -1307,7 +1313,7 @@ func initChecks(args map[string]any) ([]project.Check, []string) {
 			problems = append(problems, "check name "+shown+" must be lowercase letters, digits and dashes")
 		case slices.ContainsFunc(checks, func(c project.Check) bool { return c.Name == name }):
 			problems = append(problems, "check name "+name+" is used twice")
-		case strings.TrimSpace(run) == "" && !strings.ContainsFunc(run, unicode.IsControl):
+		case strings.TrimSpace(run) == "" && !strings.ContainsFunc(run, initControlNotTab):
 			problems = append(problems, "check "+name+" has no command")
 		default:
 			checks = append(checks, project.Check{Name: name, Run: run})
