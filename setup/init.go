@@ -1498,6 +1498,9 @@ func initNormalizeProtect(p string) string {
 func initPathUnion(a, b []string) []string {
 	out := []string{}
 	for _, s := range append(slices.Clone(a), b...) {
+		if s == "" {
+			continue
+		}
 		s = initNormalizeProtect(s)
 		if !slices.Contains(out, s) {
 			out = append(out, s)

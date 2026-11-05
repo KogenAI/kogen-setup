@@ -1955,6 +1955,31 @@ func TestInitMergeProtectPathSpelling(t *testing.T) {
 	}
 }
 
+func TestInitMergeProtectDropsEmpty(t *testing.T) {
+	for _, c := range []struct {
+		detected, proposed, want []string
+	}{
+		{[]string{""}, []string{"mix.exs"}, []string{"mix.exs"}},
+		{[]string{}, []string{""}, []string{}},
+		{[]string{"", "config/.credo.exs"}, []string{"."}, []string{"config/.credo.exs", "."}},
+	} {
+		got := Merge(project.Detected{Protect: c.detected}, InitProposal{Protect: c.proposed}).Protect
+		if !reflect.DeepEqual(got, c.want) {
+			t.Fatalf("detected %q proposed %q: got %q, want %q", c.detected, c.proposed, got, c.want)
+		}
+	}
+}
+
+func TestInitValidateProtectListShapes(t *testing.T) {
+	ctx := InitContext{Root: "/work/p", Tracked: []string{"mix.exs", "config/.credo.exs"}, Contents: map[string]string{"mix.exs": "def project, do: [deps: []]\n", "config/.credo.exs": "%{}\n"}}
+	for _, list := range []any{[]string{"./config/.credo.exs"}, []any{"./config/.credo.exs"}} {
+		got, problems := Validate(map[string]any{"protect": list}, ctx)
+		if len(problems) != 0 || !reflect.DeepEqual(got.Protect, []string{"config/.credo.exs"}) {
+			t.Fatalf("%T: protect %q problems %q", list, got.Protect, problems)
+		}
+	}
+}
+
 func TestInitValidateNormalizedProtectStillRequiresEligibility(t *testing.T) {
 	ctx := InitContext{Root: "/work/p", Tracked: []string{"mix.exs"}, Contents: map[string]string{"mix.exs": "def project, do: [deps: []]\n"}}
 	_, problems := Validate(map[string]any{"protect": []string{"./mix.exs"}}, ctx)
