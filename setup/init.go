@@ -48,6 +48,13 @@ const (
 	initMaxProtect      = 50
 )
 
+// A check name is at most initCheckNameMax characters; a refusal shows its
+// first initCheckNameShown.
+const (
+	initCheckNameMax   = 64
+	initCheckNameShown = 20
+)
+
 var (
 	initExecTimeout      = initCommandTimeout
 	initVerifyLimit      = initVerifyBudget
@@ -1344,6 +1351,12 @@ func initChecks(args map[string]any) ([]project.Check, []string) {
 			problems = append(problems, "each check needs a name and a run command")
 		case name == "acceptance" || name == "model":
 			problems = append(problems, "check name "+name+" is reserved")
+		case utf8.RuneCountInString(name) > initCheckNameMax:
+			shown := string([]rune(name)[:initCheckNameShown])
+			if strings.ContainsFunc(shown, unicode.IsControl) {
+				shown = strconv.Quote(shown)
+			}
+			problems = append(problems, "check name "+shown+"… is longer than "+strconv.Itoa(initCheckNameMax)+" characters")
 		case !initCheckNameRE.MatchString(name):
 			shown := name
 			if strings.ContainsFunc(name, unicode.IsControl) {

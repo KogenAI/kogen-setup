@@ -261,6 +261,16 @@ func TestInitValidateShapes(t *testing.T) {
 			[]string{"check name lint  must be lowercase letters, digits and dashes"}},
 		{"newline variant of a proposed name", map[string]any{"checks": initCheckList("lint", "make lint", "lint\n", "make lint")},
 			[]string{`check name "lint\n" must be lowercase letters, digits and dashes`}},
+		{"65-character name", map[string]any{"checks": initCheckList(strings.Repeat("a", 65), "make lint")},
+			[]string{"check name aaaaaaaaaaaaaaaaaaaa… is longer than 64 characters"}},
+		{"5000-character name", map[string]any{"checks": initCheckList(strings.Repeat("a", 5000), "make lint")},
+			[]string{"check name aaaaaaaaaaaaaaaaaaaa… is longer than 64 characters"}},
+		{"long name breaking the character rule", map[string]any{"checks": initCheckList("A"+strings.Repeat("a", 64), "make lint")},
+			[]string{"check name Aaaaaaaaaaaaaaaaaaaa… is longer than 64 characters"}},
+		{"long name with a control character", map[string]any{"checks": initCheckList("lint\n"+strings.Repeat("a", 60), "make lint")},
+			[]string{`check name "lint\naaaaaaaaaaaaaaa"… is longer than 64 characters`}},
+		{"long multibyte name", map[string]any{"checks": initCheckList(strings.Repeat("é", 65), "make lint")},
+			[]string{"check name éééééééééééééééééééé… is longer than 64 characters"}},
 		{"invalid arguments", map[string]any{"__invalid__": true}, nil},
 	}
 	for _, c := range cases {
@@ -2214,5 +2224,14 @@ func TestInitAlreadyInitializedReportsVacuousChecks(t *testing.T) {
 				t.Fatalf("head %s dirty %q", f.head(), f.dirtyPaths())
 			}
 		})
+	}
+}
+
+func TestInitValidateAcceptsNameOfExactlyMaximumLength(t *testing.T) {
+	parallel(t)
+	name := strings.Repeat("a", 64)
+	got, problems := Validate(map[string]any{"checks": initCheckList(name, "make lint")}, InitContext{})
+	if len(problems) != 0 || len(got.Checks) != 1 || got.Checks[0].Name != name {
+		t.Fatalf("checks %v problems %q", got.Checks, problems)
 	}
 }
