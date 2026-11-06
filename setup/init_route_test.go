@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/KogenAI/kogen-coordinator/project"
 	"github.com/KogenAI/kogen-executor/executor"
 	"github.com/KogenAI/kogen-loop/provider"
 	"github.com/KogenAI/kogen-loop/sys"
@@ -106,18 +105,6 @@ func TestInitNativeUsesExplicitHome(t *testing.T) {
 	exit, err := Init(context.Background(), s, InitInput{Client: provider.NewClient("test"), Tools: f.tools, Home: f.home})
 	if exit != 0 || err != nil || len(f.requests()) != 1 {
 		t.Fatalf("exit %d error %v requests %d", exit, err, len(f.requests()))
-	}
-}
-
-func TestInitRenderKeepsCommandsContainingModelsHeader(t *testing.T) {
-	cfg := &project.Config{Setup: []string{"printf 'models:\n'"}}
-	text := initRenderConfig(cfg)
-	if strings.Contains(text, "\nmodels:\n") {
-		t.Fatalf("unexpected models section: %s", text)
-	}
-	want := strings.TrimSuffix(project.RenderConfig(cfg), project.ModelsTemplate())
-	if text != want || !strings.Contains(text, "models:") {
-		t.Fatalf("command changed: %s", text)
 	}
 }
 

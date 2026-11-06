@@ -184,7 +184,7 @@ func initRun(ctx context.Context, s *sys.Session, in InitInput) error {
 		return sys.Fail("environment", "no_commits",
 			fmt.Sprintf("%d file(s) are not committed yet; commit them first (git add -A && git commit -m \"Initial commit\"), then run kogen init", len(uncommitted)), 3)
 	case head == "":
-		if err := initWriteFiles(repo, root, "", strings.TrimSuffix(project.Template(), project.ModelsTemplate()), map[string]string{project.ModelsPath: project.ModelsTemplate()}); err != nil {
+		if err := initWriteFiles(repo, root, "", project.Template(), map[string]string{project.ModelsPath: project.ModelsTemplate()}); err != nil {
 			return err
 		}
 		sha, err := initCommit(s, repo, []string{project.ConfigPath, project.ModelsPath, ".gitignore"}, "")
@@ -356,7 +356,7 @@ func initConfigure(ctx context.Context, s *sys.Session, in InitInput, repo *git.
 	if err != nil {
 		return err
 	}
-	if err := initWriteFiles(repo, root, head, initRenderConfig(cfg), files); err != nil {
+	if err := initWriteFiles(repo, root, head, project.RenderConfig(cfg), files); err != nil {
 		if restoreErr := initRestore(root, saved); restoreErr != nil {
 			return fmt.Errorf("%w; restoring files: %v", err, restoreErr)
 		}

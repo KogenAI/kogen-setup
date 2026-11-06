@@ -685,7 +685,7 @@ func TestInitEmptyRepositoryMakesTheFirstCommit(t *testing.T) {
 	if f.subject() != "Initial commit" || !reflect.DeepEqual(f.commitFiles(), []string{".gitignore", ".kogen/models.yaml", ".kogen/project.yaml"}) {
 		t.Fatalf("commit %q %v", f.subject(), f.commitFiles())
 	}
-	if f.read(".kogen/project.yaml") != strings.TrimSuffix(project.Template(), project.ModelsTemplate()) || f.read(project.ModelsPath) != project.ModelsTemplate() || f.read(".gitignore") != ".kogen/local/\n" {
+	if f.read(".kogen/project.yaml") != project.Template() || f.read(project.ModelsPath) != project.ModelsTemplate() || f.read(".gitignore") != ".kogen/local/\n" {
 		t.Fatalf("files: %q %q", f.read(".kogen/project.yaml"), f.read(".gitignore"))
 	}
 	if st := f.dirtyPaths(); st != "" {

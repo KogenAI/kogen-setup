@@ -57,8 +57,12 @@ func TestRepositoryAndConfig(t *testing.T) {
 		t.Fatal("unexpected head")
 	}
 	cfg := &project.Config{Setup: []string{"npm ci"}, Fix: []string{"npm run fix"}, Checks: []project.Check{{Name: "test", Run: "npm test"}}, Protect: []string{"package.json"}, Acceptance: &project.Acceptance{Run: "runner", StepsDir: "features/steps"}}
-	if !strings.Contains(project.RenderConfig(cfg), "\nmodels:\n") {
-		t.Fatal("rendered config must contain the models section used by setup")
+	for _, text := range []string{project.RenderConfig(cfg), project.Template()} {
+		for _, line := range strings.Split(text, "\n") {
+			if strings.HasPrefix(line, "models:") {
+				t.Fatal("rendered configuration and template must not contain a models section; the lineup lives in .kogen/models.yaml")
+			}
+		}
 	}
 	if err := os.WriteFile(filepath.Join(root, project.ConfigPath), []byte(project.RenderConfig(cfg)), 0600); err != nil {
 		t.Fatal(err)
@@ -119,6 +123,9 @@ func TestRepositoryAndConfig(t *testing.T) {
 	defaults, err := project.LoadModels(root)
 	if err != nil || !reflect.DeepEqual(defaults.Roles, project.DefaultModels()) {
 		t.Fatalf("template %+v %v", defaults, err)
+	}
+	if _, err := project.LoadConfig(root); err != nil {
+		t.Fatalf("template with the team file present: %v", err)
 	}
 	d := project.Detect(map[string]string{"package.json": `{"scripts":{"test":"test"},"devDependencies":{"@cucumber/cucumber":"1"}}`, "package-lock.json": "{}"}, []string{"package-lock.json", "features/steps/a.js"})
 	if !reflect.DeepEqual(d.Setup, []string{"npm ci --no-audit --no-fund"}) || !reflect.DeepEqual(d.Checks, []project.Check{{Name: "test", Run: "npm run test"}}) || d.Runner != "features/steps" {

@@ -19,11 +19,11 @@ func bridge() *project.Acceptance {
 }
 
 func selectedChatGPT(cfg *project.Config) string {
-	return strings.TrimSuffix(project.RenderConfig(cfg), project.ModelsTemplate())
+	return project.RenderConfig(cfg)
 }
 
 // files-template and one-commit: in a repository without commits, Init writes
-// project.Template() without models, project.ModelsTemplate() and the `.kogen/local/` ignore line (after the existing .gitignore) and
+// project.Template(), project.ModelsTemplate() and the `.kogen/local/` ignore line (after the existing .gitignore) and
 // makes the first commit, "Initial commit", of exactly those three files. No model is asked.
 func TestInitFirstCommitOfAnEmptyRepository(t *testing.T) {
 	f := newInitFx(t, false)
@@ -38,7 +38,7 @@ func TestInitFirstCommitOfAnEmptyRepository(t *testing.T) {
 	equal(t, "commits", f.countN(), 1)
 	equal(t, "subject", f.git("log", "-1", "--format=%s"), "Initial commit\n")
 	equalList(t, "committed", f.committed(), []string{".gitignore", project.ModelsPath, project.ConfigPath})
-	equal(t, "project.yaml", f.read(project.ConfigPath), strings.TrimSuffix(project.Template(), project.ModelsTemplate()))
+	equal(t, "project.yaml", f.read(project.ConfigPath), project.Template())
 	equal(t, "models.yaml", f.read(project.ModelsPath), project.ModelsTemplate())
 	equal(t, ".gitignore", f.read(".gitignore"), "node_modules\n.kogen/local/\n")
 	equal(t, "status", f.status(), "")

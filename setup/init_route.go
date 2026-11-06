@@ -93,10 +93,6 @@ func (r initRoute) models() map[string]project.Role {
 	return models
 }
 
-func initRenderConfig(cfg *project.Config) string {
-	return strings.TrimSuffix(project.RenderConfig(cfg), project.ModelsTemplate())
-}
-
 func initRenderModels(route initRoute) string {
 	var b strings.Builder
 	b.WriteString("models:\n")

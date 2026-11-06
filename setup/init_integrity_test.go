@@ -71,7 +71,7 @@ func TestWrittenConfigRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := &project.Config{Setup: []string{"echo 'it''s'", "mix deps.get"}, Fix: []string{"mix format"}, Checks: []project.Check{{Name: "test", Run: "mix test"}}, Protect: []string{"mix.exs"}, Acceptance: &project.Acceptance{Run: "mix test", StepsDir: "features/steps"}}
-	if err := os.WriteFile(filepath.Join(root, project.ConfigPath), []byte(initRenderConfig(want)), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, project.ConfigPath), []byte(project.RenderConfig(want)), 0600); err != nil {
 		t.Fatal(err)
 	}
 	got, err := project.LoadConfig(root)
