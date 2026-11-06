@@ -17,6 +17,8 @@ import (
 )
 
 func TestClaudeRounds(t *testing.T) {
+	// The stand-in is not the pinned size; the origin is never contacted while a runtime is installed.
+	t.Setenv(claudecode.SeamEnv, "http://127.0.0.1:1")
 	base := t.TempDir()
 	home := filepath.Join(base, "home")
 	root := filepath.Join(base, "root")

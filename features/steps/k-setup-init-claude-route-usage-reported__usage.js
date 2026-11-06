@@ -95,6 +95,9 @@ async function runInit(route, roundsText) {
     if (route === 'claude-code') {
       put(path.join(home, '.kogen/credentials/claude-code.json'), JSON.stringify({provider: 'claude-code', api_key: 'fixture-token'}));
       put(path.join(home, '.kogen/claude-code/2.1.312/claude'), claudeSource, 0o700);
+      // The stand-in is not the pinned size; the test origin is never contacted while a runtime is installed.
+      env.KOGEN_CLAUDE_CODE_URL = 'http://127.0.0.1:1';
+      for (const d of ['.kogen/claude-code', '.kogen/claude-code/2.1.312']) fs.chmodSync(path.join(home, d), 0o700);
       put(env.USAGE_FIXTURE_SCRIPT, JSON.stringify(rounds.map(r => ({answer: r.answer, usage: claudeUsage(r.usage)}))));
     } else {
       assert.equal(route, 'chatgpt');
