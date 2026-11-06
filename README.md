@@ -31,7 +31,7 @@ Init's integer exit code; `configuration` is null if no valid configuration exis
 or an object with `path` (`.kogen/project.yaml`) and `content` (the exact UTF-8
 YAML read after Init); and `error` is null on success or the error string on
 failure. The process returns Init's exit code. Init's human-readable output and
-any error go to stderr. Existing valid configuration is reported on repeat runs.
+any error go to stderr, an error with its indented detail lines. Existing valid configuration is reported on repeat runs.
 
 ## Adopting Kogen
 

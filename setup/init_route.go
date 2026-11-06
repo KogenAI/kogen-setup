@@ -41,7 +41,9 @@ func initSelectRoute(s *sys.Session, home string) (initRoute, error) {
 				return initRoute{}, sys.Fail("provider", "login", "OpenAI-compatible requires a host/base URL and model; a saved key alone is not a route. Sign in with a supported provider using kogen provider login.", 4)
 			}
 		}
-		return initRoute{}, sys.Fail("provider", "login", "not signed in; run kogen provider login for a supported provider", 4)
+		e := sys.Fail("provider", "login", "not signed in; run kogen provider login for a supported provider", 4)
+		e.Lines = initLoginRouteLines()
+		return initRoute{}, e
 	}
 	if len(routes) > 1 {
 		s.Progress("Select a route for discovery and the initial shape, build and review roles:")
@@ -64,6 +66,18 @@ func initSelectRoute(s *sys.Session, home string) (initRoute, error) {
 	}
 	s.Progress("kogen: selected " + routes[0].name + " for discovery and shape, build and review")
 	return routes[0], nil
+}
+
+// initLoginRouteLines is the fixed detail under the no-login refusal. The variable names are
+// literal text: nothing here reads the environment or a stored credential.
+func initLoginRouteLines() []string {
+	return []string{
+		"browser sign-in: kogen provider login chatgpt",
+		`no browser, Anthropic API key on standard input: printf '%s' "$ANTHROPIC_API_KEY" | kogen provider login anthropic`,
+		`no browser, Claude Code token on standard input: printf '%s' "$CLAUDE_CODE_OAUTH_TOKEN" | kogen provider login claude-code`,
+		"kogen provider --help lists every route",
+		`with anthropic or claude-code, init then needs the configuration-first files described in docs/getting-started.md ("Without ChatGPT")`,
+	}
 }
 
 func (r initRoute) models() map[string]project.Role {

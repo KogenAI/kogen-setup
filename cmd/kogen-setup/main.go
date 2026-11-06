@@ -47,7 +47,11 @@ func main() {
 	if err != nil {
 		message := err.Error()
 		r.Error = &message
-		fmt.Fprintln(os.Stderr, err)
+		if se, ok := sys.AsError(err); ok {
+			fmt.Fprint(os.Stderr, se.Render())
+		} else {
+			fmt.Fprintln(os.Stderr, message)
+		}
 	}
 	if repo, err := git.Open(s.Cwd, s.Env); err == nil {
 		if _, err := project.LoadConfig(repo.Dir); err == nil {

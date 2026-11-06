@@ -758,6 +758,19 @@ func TestInitWithoutLoginWritesNothing(t *testing.T) {
 	if e.Detail != "not signed in; run kogen provider login for a supported provider" || f.exists(".kogen") || len(f.requests()) != 0 {
 		t.Fatalf("%v", e)
 	}
+	lines := []string{
+		"browser sign-in: kogen provider login chatgpt",
+		`no browser, Anthropic API key on standard input: printf '%s' "$ANTHROPIC_API_KEY" | kogen provider login anthropic`,
+		`no browser, Claude Code token on standard input: printf '%s' "$CLAUDE_CODE_OAUTH_TOKEN" | kogen provider login claude-code`,
+		"kogen provider --help lists every route",
+		`with anthropic or claude-code, init then needs the configuration-first files described in docs/getting-started.md ("Without ChatGPT")`,
+	}
+	if !reflect.DeepEqual(e.Lines, lines) {
+		t.Fatalf("lines %q", e.Lines)
+	}
+	if want := "provider/login: not signed in; run kogen provider login for a supported provider\n  " + strings.Join(lines, "\n  "); strings.TrimRight(e.Render(), "\n") != want {
+		t.Fatalf("render %q", e.Render())
+	}
 	if st := f.dirtyPaths(); st != "" {
 		t.Fatalf("status %q", st)
 	}
