@@ -1672,28 +1672,44 @@ func initCommittedCopy(s *sys.Session, repo *git.Repo, root, clone string, track
 	if err != nil {
 		return err
 	}
+	trackedSet := make(map[string]struct{}, len(tracked))
+	for _, p := range tracked {
+		trackedSet[p] = struct{}{}
+	}
 	var restore []string
 	for _, p := range changed {
 		if err := os.RemoveAll(filepath.Join(clone, p)); err != nil {
 			return err
 		}
-		if slices.Contains(tracked, p) {
+		if _, ok := trackedSet[p]; ok {
 			restore = append(restore, p)
 		}
 	}
-	if len(restore) == 0 {
-		return nil
-	}
-	quoted := make([]string, len(restore))
-	for i, p := range restore {
-		quoted[i] = initShellQuote(p)
-	}
-	res, err := s.Run(git.UnsetPrefix()+"git archive --format=tar HEAD -- "+strings.Join(quoted, " ")+" | tar -xf - -C "+initShellQuote(clone), root, sys.Options{KillGroupOnExit: true})
-	if err != nil {
-		return err
-	}
-	if res.Status != 0 {
-		return fmt.Errorf("restoring the committed files for init failed: %s", res.Output)
+	// Count the actual git argv bytes, including each argument's NUL terminator.
+	const maxGitArgv = 32768
+	const archiveArgvBytes = len("git") + 1 + len("archive") + 1 + len("--format=tar") + 1 + len("HEAD") + 1 + len("--") + 1
+	for start := 0; start < len(restore); {
+		size := archiveArgvBytes
+		end := start
+		for end < len(restore) && size+len(restore[end])+1 <= maxGitArgv {
+			size += len(restore[end]) + 1
+			end++
+		}
+		if end == start {
+			return fmt.Errorf("restoring the committed files for init failed: path exceeds Git argv limit")
+		}
+		quoted := make([]string, end-start)
+		for i, p := range restore[start:end] {
+			quoted[i] = initShellQuote(p)
+		}
+		res, err := s.Run(git.UnsetPrefix()+"git archive --format=tar HEAD -- "+strings.Join(quoted, " ")+" | tar -xf - -C "+initShellQuote(clone), root, sys.Options{KillGroupOnExit: true})
+		if err != nil {
+			return err
+		}
+		if res.Status != 0 {
+			return fmt.Errorf("restoring the committed files for init failed: %s", res.Output)
+		}
+		start = end
 	}
 	return nil
 }
