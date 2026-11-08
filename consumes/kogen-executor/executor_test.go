@@ -29,7 +29,7 @@ func TestClaudeRounds(t *testing.T) {
 		}
 	}
 	fake := `#!/bin/sh
-if [ "$1" = --version ]; then echo '2.1.312 (Claude Code)'; exit 0; fi
+if [ "$1" = --version ]; then echo '2.1.318 (Claude Code)'; exit 0; fi
 if [ "$1" = auth ]; then echo '{"loggedIn":true,"authMethod":"oauth_token","apiProvider":"firstParty","subscriptionType":"max"}'; exit 0; fi
 printf '%s\n' "$@" > "$HOME/args"
 cat <&3 > "$HOME/token"
@@ -39,7 +39,7 @@ while [ "$#" -gt 0 ]; do
  shift
 done
 cat > "$HOME/prompt"
-printf '{"type":"system","subtype":"init","cwd":"%s","session_id":"%s","mcp_servers":[],"model":"claude-sonnet-5-5","permissionMode":"acceptEdits","apiKeySource":"none","claude_code_version":"2.1.312","uuid":"00000000-0000-4000-8000-000000000001"}\n' "$PWD" "$session"
+printf '{"type":"system","subtype":"init","cwd":"%s","session_id":"%s","mcp_servers":[],"model":"claude-sonnet-5-5","permissionMode":"acceptEdits","apiKeySource":"none","claude_code_version":"2.1.318","uuid":"00000000-0000-4000-8000-000000000001"}\n' "$PWD" "$session"
 printf '{"type":"result","subtype":"success","is_error":false,"num_turns":1,"session_id":"%s","result":"done","terminal_reason":"completed","stop_reason":"end_turn","permission_denials":[],"structured_output":{"setup":[],"checks":[]}}\n' "$session"
 `
 	if err := os.WriteFile(claudecode.RuntimePath(home), []byte(fake), 0700); err != nil {

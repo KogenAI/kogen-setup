@@ -36,13 +36,13 @@ function messages() {
 }
 const claudeSource = `#!${process.execPath}
 const fs=require('node:fs'); const a=process.argv.slice(2);
-if(a[0]==='--version'){console.log('2.1.312 (Claude Code)');process.exit(0);}
+if(a[0]==='--version'){console.log('2.1.318 (Claude Code)');process.exit(0);}
 if(a[0]==='auth'){console.log(JSON.stringify({loggedIn:true,authMethod:'claude.ai',apiProvider:'firstParty',subscriptionType:'max'}));process.exit(0);}
 const sid=a[a.indexOf('--session-id')+1];
 const token=fs.readFileSync(3,'utf8'); if(token!=='fixture-token') throw Error('fixture token not delivered');
 let input=''; process.stdin.on('data',b=>input+=b);process.stdin.on('end',()=>{
 fs.appendFileSync(process.env.INIT_CLAUDE_LOG,JSON.stringify({args:a,input,token})+'\\n');
-console.log(JSON.stringify({type:'system',subtype:'init',cwd:process.cwd(),session_id:sid,mcp_servers:[],model:'claude-sonnet-5-5',permissionMode:'acceptEdits',apiKeySource:'none',claude_code_version:'2.1.312'}));
+console.log(JSON.stringify({type:'system',subtype:'init',cwd:process.cwd(),session_id:sid,mcp_servers:[],model:'claude-sonnet-5-5',permissionMode:'acceptEdits',apiKeySource:'none',claude_code_version:'2.1.318'}));
 console.log(JSON.stringify({type:'result',subtype:'success',is_error:false,num_turns:1,session_id:sid,result:'',terminal_reason:'completed',stop_reason:'end_turn',permission_denials:[],structured_output:${JSON.stringify(proposal)},usage:{input_tokens:10,output_tokens:10,cache_read_input_tokens:0,cache_creation_input_tokens:0},total_cost_usd:0}));
 });
 `;
@@ -82,7 +82,7 @@ async function fixture(routes, mode = 'fresh', selection = '') {
       else cred={provider:route,api_key:route==='claude-code'?'fixture-token':'fixture-key'};
       put(path.join(home,'.kogen/credentials',route+'.json'),JSON.stringify(cred));
     }
-    put(path.join(home,'.kogen/claude-code/2.1.312/claude'),claudeSource,0o700);
+    put(path.join(home,'.kogen/claude-code/2.1.318/claude'),claudeSource,0o700);
     let original = null;
     if(mode==='existing'||mode==='leftover') {
       original='version: 1\ncommands:\n  setup: []\n  fix: []\n  checks: []\n  acceptance:\n    run: null\n    steps_dir: null\nprotect: []\nmodels:\n  shape:\n    provider: supergrok\n    model: grok-4.7\n    effort: high\n  build:\n    executor: native\n    model: gpt-6.1-sol\n    effort: medium\n  review:\n    executor: claude-code\n    model: claude-sonnet-5-5\n    effort: high\n    max_rounds: 3\n';

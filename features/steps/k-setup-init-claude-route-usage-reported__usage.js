@@ -11,7 +11,7 @@ const INVALID = {setup: [], fix: [], checks: [{name: 'c'.repeat(65), run: 'test 
 const INVALID_ERROR = 'provider/init_invalid: the model did not return a valid configuration; nothing was written';
 const claudeSource = `#!${process.execPath}
 const fs=require('node:fs');const a=process.argv.slice(2);
-if(a[0]==='--version'){console.log('2.1.312 (Claude Code)');process.exit(0);}
+if(a[0]==='--version'){console.log('2.1.318 (Claude Code)');process.exit(0);}
 if(a[0]==='auth'){console.log(JSON.stringify({loggedIn:true,authMethod:'claude.ai',apiProvider:'firstParty',subscriptionType:'max'}));process.exit(0);}
 const at=a.indexOf('--session-id')>=0?a.indexOf('--session-id'):a.indexOf('--resume');const sid=a[at+1];
 const token=fs.readFileSync(3,'utf8');if(token!=='fixture-token')throw Error('fixture token not delivered');
@@ -20,7 +20,7 @@ const log=process.env.USAGE_FIXTURE_LOG;const n=fs.existsSync(log)?fs.readFileSy
 fs.appendFileSync(log,JSON.stringify({args:a,input})+'\\n');
 const round=JSON.parse(fs.readFileSync(process.env.USAGE_FIXTURE_SCRIPT,'utf8'))[n];
 if(!round){process.stderr.write('no scripted round '+(n+1)+'\\n');process.exit(9);}
-console.log(JSON.stringify({type:'system',subtype:'init',cwd:process.cwd(),session_id:sid,mcp_servers:[],model:'claude-sonnet-5-5',permissionMode:'acceptEdits',apiKeySource:'none',claude_code_version:'2.1.312'}));
+console.log(JSON.stringify({type:'system',subtype:'init',cwd:process.cwd(),session_id:sid,mcp_servers:[],model:'claude-sonnet-5-5',permissionMode:'acceptEdits',apiKeySource:'none',claude_code_version:'2.1.318'}));
 const result={type:'result',subtype:'success',is_error:false,num_turns:1,session_id:sid,result:'',terminal_reason:'completed',stop_reason:'end_turn',permission_denials:[],structured_output:round.answer,total_cost_usd:0};
 if(round.usage)result.usage=round.usage;
 console.log(JSON.stringify(result));
@@ -94,10 +94,10 @@ async function runInit(route, roundsText) {
     env.PATH = bin + ':' + process.env.PATH; env.KOGEN_NODE = path.join(bin, 'node'); env.KOGEN_CUCUMBER = path.join(tmp, 'cucumber');
     if (route === 'claude-code') {
       put(path.join(home, '.kogen/credentials/claude-code.json'), JSON.stringify({provider: 'claude-code', api_key: 'fixture-token'}));
-      put(path.join(home, '.kogen/claude-code/2.1.312/claude'), claudeSource, 0o700);
+      put(path.join(home, '.kogen/claude-code/2.1.318/claude'), claudeSource, 0o700);
       // The stand-in is not the pinned size; the test origin is never contacted while a runtime is installed.
       env.KOGEN_CLAUDE_CODE_URL = 'http://127.0.0.1:1';
-      for (const d of ['.kogen/claude-code', '.kogen/claude-code/2.1.312']) fs.chmodSync(path.join(home, d), 0o700);
+      for (const d of ['.kogen/claude-code', '.kogen/claude-code/2.1.318']) fs.chmodSync(path.join(home, d), 0o700);
       put(env.USAGE_FIXTURE_SCRIPT, JSON.stringify(rounds.map(r => ({answer: r.answer, usage: claudeUsage(r.usage)}))));
     } else {
       assert.equal(route, 'chatgpt');
