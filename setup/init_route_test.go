@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/KogenAI/kogen-executor/executor"
@@ -86,10 +85,7 @@ func TestInitCompatibleKeyDoesNotSupplyRoute(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "openai-compatible.json"), []byte(`{"provider":"openai-compatible","api_key":"fixture"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	exit, _, _, err := f.run("")
-	if exit != 4 || err == nil || !strings.Contains(err.Error(), "host/base URL and model") {
-		t.Fatalf("exit %d error %v", exit, err)
-	}
+	f.wantError("provider", "login", 4)
 	if f.exists(".kogen") || len(f.requests()) != 0 || f.head() != head {
 		t.Fatal("incomplete route changed repository or sent request")
 	}
