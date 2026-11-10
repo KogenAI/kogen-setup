@@ -3,7 +3,7 @@
 These packages run independently with `go test ./consumes/kogen-coordinator/...`,
 `go test ./consumes/kogen-executor/...`, `go test ./consumes/kogen-loop/...`, and
 `go test ./consumes/kogen-verification/...`. They use producer exports, temporary
-roots and HOME, loopback HTTP, and a locally written fake Claude program; they do
+roots and HOME, loopback HTTP, and the Executor Claude runtime fixture; they do
 not use a real provider or Claude installation. Git's system and global settings
 are disabled for the fixture repositories. Names below refer to tests in the named
 consumer package, not to producer implementation tests.

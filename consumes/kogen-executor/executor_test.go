@@ -14,44 +14,35 @@ import (
 	"github.com/KogenAI/kogen-executor/agent"
 	"github.com/KogenAI/kogen-executor/executor"
 	"github.com/KogenAI/kogen-executor/executor/claudecode"
+	"github.com/KogenAI/kogen-executor/testkit/clauderuntime"
 )
 
 func TestClaudeRounds(t *testing.T) {
-	// The stand-in is not the pinned size; the origin is never contacted while a runtime is installed.
-	t.Setenv(claudecode.SeamEnv, "http://127.0.0.1:1")
 	base := t.TempDir()
 	home := filepath.Join(base, "home")
 	root := filepath.Join(base, "root")
 	dir := filepath.Join(base, "task")
-	for _, p := range []string{home, root, filepath.Dir(claudecode.RuntimePath(home))} {
+	for _, p := range []string{home, root} {
 		if err := os.MkdirAll(p, 0700); err != nil {
 			t.Fatal(err)
 		}
 	}
-	fake := `#!/bin/sh
-if [ "$1" = --version ]; then echo '2.1.318 (Claude Code)'; exit 0; fi
-if [ "$1" = auth ]; then echo '{"loggedIn":true,"authMethod":"oauth_token","apiProvider":"firstParty","subscriptionType":"max"}'; exit 0; fi
-printf '%s\n' "$@" > "$HOME/args"
-cat <&3 > "$HOME/token"
-session=''
-while [ "$#" -gt 0 ]; do
- case "$1" in --session-id|--resume) session="$2"; shift;; esac
- shift
-done
-cat > "$HOME/prompt"
-printf '{"type":"system","subtype":"init","cwd":"%s","session_id":"%s","mcp_servers":[],"model":"claude-sonnet-5-5","permissionMode":"acceptEdits","apiKeySource":"none","claude_code_version":"2.1.318","uuid":"00000000-0000-4000-8000-000000000001"}\n' "$PWD" "$session"
-printf '{"type":"result","subtype":"success","is_error":false,"num_turns":1,"session_id":"%s","result":"done","terminal_reason":"completed","stop_reason":"end_turn","permission_denials":[],"structured_output":{"setup":[],"checks":[]}}\n' "$session"
-`
-	if err := os.WriteFile(claudecode.RuntimePath(home), []byte(fake), 0700); err != nil {
+	checkout, err := filepath.EvalSymlinks(root)
+	if err != nil {
 		t.Fatal(err)
 	}
+	resultLine := clauderuntime.ResultLine(map[string]any{"structured_output": map[string]any{"setup": []any{}, "checks": []any{}}})
+	fixture := clauderuntime.Install(t, clauderuntime.Options{
+		Home: home, State: filepath.Join(base, "state"), Checkout: checkout,
+		Rounds: [][]string{{resultLine}, {resultLine}},
+	})
 	a := claudecode.New(claudecode.Options{Home: home, Env: []string{"HOME=" + home, "PATH=" + os.Getenv("PATH"), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=" + filepath.Join(home, "gitconfig")}, Stderr: io.Discard, Token: "fake-token", HookCommand: []string{"fixture", claudecode.HookSubcommand}})
 	s, err := a.Start(context.Background(), executor.Task{Role: executor.RoleShape, Root: root, Home: home, Dir: dir, Model: "claude-sonnet-5-5", Effort: "high", Schema: json.RawMessage(`{"type":"object"}`), Brief: executor.Brief{Stable: "policy", Dynamic: "input"}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	for _, feedback := range []string{"", "invalid: retry"} {
+	for i, feedback := range []string{"", "invalid: retry"} {
 		result, err := s.Round(context.Background(), executor.Input{Feedback: feedback})
 		if err != nil {
 			t.Fatal(err)
@@ -60,23 +51,16 @@ printf '{"type":"result","subtype":"success","is_error":false,"num_turns":1,"ses
 		if err := json.Unmarshal(result.Structured, &got); err != nil || !reflect.DeepEqual(got, map[string]any{"setup": []any{}, "checks": []any{}}) {
 			t.Fatalf("structured %s %v", result.Structured, err)
 		}
-		args, err := os.ReadFile(filepath.Join(home, "args"))
-		if err != nil {
-			t.Fatal(err)
-		}
+		args := fixture.Args(t, i+1)
 		for _, want := range []string{"--model\nclaude-sonnet-5-5", "--effort\nhigh", "--json-schema\n{\"type\":\"object\"}"} {
-			if !strings.Contains(string(args), want) {
-				t.Fatalf("missing %q in arguments %s", want, args)
+			if !strings.Contains(strings.Join(args, "\n"), want) {
+				t.Fatalf("missing %q in arguments %v", want, args)
 			}
 		}
-		token, err := os.ReadFile(filepath.Join(home, "token"))
-		if err != nil || string(token) != "fake-token" {
-			t.Fatalf("token %q %v", token, err)
+		if token := fixture.Token(t, i+1); token != "fake-token" {
+			t.Fatalf("token %q", token)
 		}
-		prompt, err := os.ReadFile(filepath.Join(home, "prompt"))
-		if err != nil {
-			t.Fatal(err)
-		}
+		prompt := fixture.Prompt(t, i+1)
 		if feedback != "" && !strings.Contains(string(prompt), feedback) {
 			t.Fatalf("feedback missing: %s", prompt)
 		}
