@@ -45,6 +45,9 @@ func initSelectRoute(s *sys.Session, home string) (initRoute, error) {
 		e.Lines = initLoginRouteLines()
 		return initRoute{}, e
 	}
+	if route, set, err := initRouteFromEnv(s, routes); set {
+		return route, err
+	}
 	if len(routes) > 1 {
 		s.Progress("Select a route for discovery and the initial shape, build and review roles:")
 		for i, r := range routes {
@@ -52,7 +55,7 @@ func initSelectRoute(s *sys.Session, home string) (initRoute, error) {
 		}
 		st, err := os.Stdin.Stat()
 		if err != nil || st.Mode()&os.ModeCharDevice == 0 {
-			return initRoute{}, sys.Fail("provider", "selection_required", "select a route in a terminal before initialization", 4)
+			return initRoute{}, sys.Fail("provider", "selection_required", initRouteNonterminalMessage(routes), 4)
 		}
 		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
 		if err != nil {
