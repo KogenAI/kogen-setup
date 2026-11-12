@@ -252,3 +252,45 @@ func TestIntegrityRestoreNewDirectories(t *testing.T) {
 		t.Fatalf("dangling .kogen symlink removed: %v", err)
 	}
 }
+
+func TestInitRestoreEnforcesSavedFileMode(t *testing.T) {
+	root := t.TempDir()
+	name := filepath.Join(root, "restricted")
+	if err := os.WriteFile(name, []byte("original\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := initSnapshot(root, []string{"restricted"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// WriteFile keeps the mode of an existing file, so only an explicit chmod restores 0600.
+	if err := os.Chmod(name, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := initRestore(root, saved); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := os.Stat(name); err != nil || st.Mode().Perm() != 0o600 {
+		t.Fatalf("mode %v err %v", st, err)
+	}
+}
+
+func TestInitRestoreFailureAfterWrittenConfigMismatch(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores file permissions")
+	}
+	f := initNewFx(t, true, initNothing())
+	f.write("README.md", "# fixture\n")
+	f.write(project.ModelsPath, project.ModelsTemplate())
+	f.commitAll("initial")
+	// The local checks file is untracked, so only reloading the written configuration sees it.
+	f.write(project.LocalChecksPath, "checks: [x\n")
+	models := filepath.Join(f.repo, project.ModelsPath)
+	if err := os.Chmod(models, 0o400); err != nil {
+		t.Fatal(err)
+	}
+	exit, _, _, err := f.run("")
+	if exit != 3 || err == nil || !strings.Contains(err.Error(), "loading written configuration") || !strings.Contains(err.Error(), "restoring files") {
+		t.Fatalf("exit %d err %v", exit, err)
+	}
+}
