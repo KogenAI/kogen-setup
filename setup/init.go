@@ -2053,7 +2053,7 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 	if runner != "" {
 		err = initExistingRunner(ctx, s, in, clone, runner, &res)
 	} else {
-		err = initAddBridge(ctx, s, in, clone, &res)
+		err = initAddBridge(ctx, s, in, repo.Dir, clone, &res)
 	}
 	if err != nil {
 		return res, err
@@ -2463,7 +2463,40 @@ func initExistingRunner(ctx context.Context, s *sys.Session, in InitInput, clone
 	return nil
 }
 
-func initAddBridge(ctx context.Context, s *sys.Session, in InitInput, clone string, res *initResult) error {
+// initBridgeConflict says why the bridge README cannot be added under any of the bases (the
+// verification copy and the project folder), or "" when the path is free and its parents are
+// directories. Nothing is written.
+func initBridgeConflict(bases ...string) string {
+	const left = ", so the Cucumber bridge was left out"
+	for _, base := range bases {
+		parentsExist := true
+		for _, dir := range []string{"features", "features/steps"} {
+			st, err := os.Lstat(filepath.Join(base, dir))
+			if err != nil && os.IsNotExist(err) {
+				parentsExist = false // nothing below an absent directory exists either
+				break
+			}
+			if err != nil || !st.IsDir() {
+				return dir + " is not a usable directory" + left
+			}
+		}
+		if !parentsExist {
+			continue
+		}
+		if _, err := os.Lstat(filepath.Join(base, initStepsReadmePath)); err == nil {
+			return initStepsReadmePath + " already exists" + left
+		} else if !os.IsNotExist(err) {
+			return initStepsReadmePath + " cannot be inspected" + left
+		}
+	}
+	return ""
+}
+
+func initAddBridge(ctx context.Context, s *sys.Session, in InitInput, root, clone string, res *initResult) error {
+	if reason := initBridgeConflict(clone, root); reason != "" {
+		res.how = "not configured: " + reason
+		return nil
+	}
 	if err := os.MkdirAll(filepath.Join(clone, "features/steps"), 0o755); err != nil {
 		return err
 	}
