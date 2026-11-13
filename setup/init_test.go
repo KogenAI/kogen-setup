@@ -2367,3 +2367,80 @@ func TestInitValidateAcceptsNameOfExactlyMaximumLength(t *testing.T) {
 		t.Fatalf("checks %v problems %q", got.Checks, problems)
 	}
 }
+
+const initBridgeReadmeText = "Cucumber step definitions for Kogen acceptance scenarios.\n"
+
+func TestInitConfiguresTheBridgeOverAnIdenticalTrackedStepsReadme(t *testing.T) {
+	parallel(t)
+	f := initNewFx(t, true, initNothing())
+	f.write("README.md", "# notes\n")
+	f.write("features/steps/README.md", initBridgeReadmeText)
+	f.commitAll("notes")
+
+	exit, out, errs, err := f.run(f.repo)
+	if err != nil || exit != 0 {
+		t.Fatalf("exit %d: %v\n%s\n%s", exit, err, out, errs)
+	}
+	if !strings.Contains(out, "Acceptance: Cucumber bridge added in features/steps\n") {
+		t.Fatalf("output:\n%s", out)
+	}
+	cfg := f.config()
+	if cfg.Acceptance == nil || cfg.Acceptance.StepsDir != "features/steps" || !strings.Contains(cfg.Acceptance.Run, "$KOGEN_CUCUMBER/@cucumber/cucumber/bin/cucumber.js") {
+		t.Fatalf("acceptance %+v", cfg.Acceptance)
+	}
+	if f.read("features/steps/README.md") != initBridgeReadmeText {
+		t.Fatal("README changed")
+	}
+	if got := f.commitFiles(); !reflect.DeepEqual(got, []string{".gitignore", ".kogen/models.yaml", ".kogen/project.yaml"}) {
+		t.Fatalf("commit files %v", got)
+	}
+	if st := f.dirtyPaths(); st != "" {
+		t.Fatalf("working tree: %q", st)
+	}
+}
+
+func TestInitLeavesTheBridgeOutWhenTheStepsReadmeDiffers(t *testing.T) {
+	parallel(t)
+	f := initNewFx(t, true, initNothing())
+	f.write("README.md", "# notes\n")
+	f.write("features/steps/README.md", "mine\n")
+	f.commitAll("notes")
+
+	exit, out, errs, err := f.run(f.repo)
+	if err != nil || exit != 0 {
+		t.Fatalf("exit %d: %v\n%s\n%s", exit, err, out, errs)
+	}
+	if !strings.Contains(out, "Acceptance: not configured: features/steps/README.md already exists, so the Cucumber bridge was left out\n") {
+		t.Fatalf("output:\n%s", out)
+	}
+	if f.config().Acceptance != nil {
+		t.Fatal("acceptance configured")
+	}
+	if f.read("features/steps/README.md") != "mine\n" {
+		t.Fatal("README changed")
+	}
+	if got := f.commitFiles(); !reflect.DeepEqual(got, []string{".gitignore", ".kogen/models.yaml", ".kogen/project.yaml"}) {
+		t.Fatalf("commit files %v", got)
+	}
+}
+
+func TestInitAddsTheBridgeWhenThereIsNoStepsReadme(t *testing.T) {
+	parallel(t)
+	f := initNewFx(t, true, initNothing())
+	f.write("README.md", "# notes\n")
+	f.commitAll("notes")
+
+	exit, out, errs, err := f.run(f.repo)
+	if err != nil || exit != 0 {
+		t.Fatalf("exit %d: %v\n%s\n%s", exit, err, out, errs)
+	}
+	if !strings.Contains(out, "Acceptance: Cucumber bridge added in features/steps\n") {
+		t.Fatalf("output:\n%s", out)
+	}
+	if f.read("features/steps/README.md") != initBridgeReadmeText {
+		t.Fatal("README not written")
+	}
+	if got := f.commitFiles(); !reflect.DeepEqual(got, []string{".gitignore", ".kogen/models.yaml", ".kogen/project.yaml", "features/steps/README.md"}) {
+		t.Fatalf("commit files %v", got)
+	}
+}

@@ -345,11 +345,11 @@ func initConfigure(ctx context.Context, s *sys.Session, in InitInput, repo *git.
 	if !modelsExist {
 		files[project.ModelsPath] = initRenderModels(route)
 	}
-	if res.bridge {
+	if res.bridgeFile {
 		files[initStepsReadmePath] = initStepsReadme
 	}
 	paths := []string{project.ConfigPath, project.ModelsPath, ".gitignore"}
-	if res.bridge {
+	if res.bridgeFile {
 		paths = append(paths, initStepsReadmePath)
 	}
 	saved, err := initSnapshot(root, paths)
@@ -1719,7 +1719,7 @@ type initResult struct {
 	checks              []project.Check
 	acceptance          *project.Acceptance
 	how                 string
-	bridge              bool
+	bridgeFile          bool // the bridge README is to be written and committed
 	leftOut             []string
 	drops               []string
 }
@@ -2464,8 +2464,8 @@ func initExistingRunner(ctx context.Context, s *sys.Session, in InitInput, clone
 }
 
 // initBridgeConflict says why the bridge README cannot be added under any of the bases (the
-// verification copy and the project folder), or "" when the path is free and its parents are
-// directories. Nothing is written.
+// verification copy and the project folder), or "" when the path is free (or holds exactly the
+// bridge's own README) and its parents are directories. Nothing is written.
 func initBridgeConflict(bases ...string) string {
 	const left = ", so the Cucumber bridge was left out"
 	for _, base := range bases {
@@ -2483,7 +2483,13 @@ func initBridgeConflict(bases ...string) string {
 		if !parentsExist {
 			continue
 		}
-		if _, err := os.Lstat(filepath.Join(base, initStepsReadmePath)); err == nil {
+		if st, err := os.Lstat(filepath.Join(base, initStepsReadmePath)); err == nil {
+			if st.Mode().IsRegular() {
+				// Adding the bridge replaces nothing when the file is already the bridge's README.
+				if got, rerr := os.ReadFile(filepath.Join(base, initStepsReadmePath)); rerr == nil && string(got) == initStepsReadme {
+					continue
+				}
+			}
 			return initStepsReadmePath + " already exists" + left
 		} else if !os.IsNotExist(err) {
 			return initStepsReadmePath + " cannot be inspected" + left
@@ -2497,11 +2503,13 @@ func initAddBridge(ctx context.Context, s *sys.Session, in InitInput, root, clon
 		res.how = "not configured: " + reason
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Join(clone, "features/steps"), 0o755); err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(clone, initStepsReadmePath), []byte(initStepsReadme), 0o644); err != nil {
-		return err
+	if _, err := os.Lstat(filepath.Join(clone, initStepsReadmePath)); os.IsNotExist(err) {
+		if err := os.MkdirAll(filepath.Join(clone, "features/steps"), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(clone, initStepsReadmePath), []byte(initStepsReadme), 0o644); err != nil {
+			return err
+		}
 	}
 	run := project.AcceptanceCommand("features/steps", project.KogenRunner)
 	reason, _, err := verify.RunnerCheck(ctx, s, in.Tools, clone, run)
@@ -2514,7 +2522,8 @@ func initAddBridge(ctx context.Context, s *sys.Session, in InitInput, root, clon
 	}
 	res.acceptance = &project.Acceptance{Run: run, StepsDir: "features/steps"}
 	res.how = "Cucumber bridge added in features/steps"
-	res.bridge = true
+	_, statErr := os.Lstat(filepath.Join(root, initStepsReadmePath))
+	res.bridgeFile = os.IsNotExist(statErr) // an identical README already there stays untouched
 	return nil
 }
 
