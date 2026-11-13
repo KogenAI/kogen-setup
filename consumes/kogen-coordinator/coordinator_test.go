@@ -90,8 +90,17 @@ func TestRepositoryAndConfig(t *testing.T) {
 		t.Fatalf("listing %q %v", listing, err)
 	}
 	gd, err := repo.GitDir()
-	if err != nil || gd != filepath.Join(root, ".git") {
-		t.Fatalf("gitdir %q %v", gd, err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Git reports the resolved path, so resolve symlinks (such as the
+	// macOS /var link) on both sides before comparing.
+	wantGD, err := filepath.EvalSymlinks(filepath.Join(root, ".git"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotGD, err := filepath.EvalSymlinks(gd); err != nil || gotGD != wantGD {
+		t.Fatalf("gitdir %q want %q %v", gd, wantGD, err)
 	}
 	if err := os.WriteFile(filepath.Join(root, project.ConfigPath), []byte(project.Template()), 0600); err != nil {
 		t.Fatal(err)
