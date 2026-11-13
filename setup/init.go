@@ -776,6 +776,9 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		if initPublishesOrDeploys(c.Run) {
 			problems = append(problems, fmt.Sprintf("check %s (%s) publishes or deploys", c.Name, c.Run))
 		}
+		if initContactsRemoteHost(c.Run) {
+			problems = append(problems, fmt.Sprintf("check %s (%s) contacts a remote host; checks must not depend on the network", c.Name, c.Run))
+		}
 		if initRunsNothing(c.Run, false) {
 			problems = append(problems, fmt.Sprintf("check %s (%s) runs nothing", c.Name, c.Run))
 		} else if initMasksFailure(c.Run) {
@@ -898,6 +901,9 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		}
 		if initPublishesOrDeploys(command) {
 			problems = append(problems, "fix command "+command+" publishes or deploys")
+		}
+		if initContactsRemoteHost(command) {
+			problems = append(problems, "fix command "+command+" contacts a remote host")
 		}
 		if ctx.Env != nil {
 			for _, name := range initUnsetVariables(command, ctx.Env) {
