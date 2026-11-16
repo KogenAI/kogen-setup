@@ -26,6 +26,15 @@ func TestInitRouteChild(t *testing.T) {
 	os.Exit(0)
 }
 
+// initRouteTestPython prefers the system interpreter: a version-manager shim
+// named python3 can fail on its own configuration before the script starts.
+func initRouteTestPython() string {
+	if st, err := os.Stat("/usr/bin/python3"); err == nil && st.Mode().IsRegular() {
+		return "/usr/bin/python3"
+	}
+	return "python3"
+}
+
 func TestInitChooserRejectsInvalidAndEOF(t *testing.T) {
 	for _, answer := range []string{"\n", "9\n", "eof"} {
 		t.Run(answer, func(t *testing.T) {
@@ -59,7 +68,7 @@ sys.exit(os.waitstatus_to_exitcode(status))`
 			if err != nil {
 				t.Fatal(err)
 			}
-			cmd := exec.Command("python3", "-c", script, exe, answer)
+			cmd := exec.Command(initRouteTestPython(), "-c", script, exe, answer)
 			cmd.Env = append(os.Environ(), f.env...)
 			cmd.Env = append(cmd.Env, "INIT_ROUTE_TEST_REPO="+f.repo)
 			err = cmd.Run()

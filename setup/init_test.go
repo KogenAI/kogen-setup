@@ -712,7 +712,7 @@ func TestInitRefusesFilesNotCommittedYet(t *testing.T) {
 	f := initNewFx(t, false)
 	f.write("app.txt", "x")
 	e := f.wantError("environment", "no_commits", 3)
-	if e.Detail != `1 file(s) are not committed yet; commit them first (git add -A && git commit -m "Initial commit"), then run kogen init` {
+	if e.Detail != `1 file(s) are not committed yet (app.txt); commit them first (git add -A && git commit -m "Initial commit"), then run kogen init` {
 		t.Fatal(e.Detail)
 	}
 	if f.exists(".kogen") {

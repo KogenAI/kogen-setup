@@ -175,16 +175,24 @@ func initRun(ctx context.Context, s *sys.Session, in InitInput) error {
 		}
 	}
 	if head != "" {
+		var named []string
 		for _, p := range paths {
 			if slices.Contains(dirty, p) {
-				return sys.Fail("environment", "dirty_tree", p+" has uncommitted changes; commit, stash or discard them first", 5)
+				named = append(named, p)
 			}
+		}
+		if len(named) > 0 {
+			verb := "has"
+			if len(named) > 1 {
+				verb = "have"
+			}
+			return sys.Fail("environment", "dirty_tree", strings.Join(named, ", ")+" "+verb+" uncommitted changes; commit, stash or discard them first", 5)
 		}
 	}
 	switch {
 	case head == "" && len(uncommitted) > 0:
 		return sys.Fail("environment", "no_commits",
-			fmt.Sprintf("%d file(s) are not committed yet; commit them first (git add -A && git commit -m \"Initial commit\"), then run kogen init", len(uncommitted)), 3)
+			fmt.Sprintf("%d file(s) are not committed yet (%s); commit them first (git add -A && git commit -m \"Initial commit\"), then run kogen init", len(uncommitted), initPathList(uncommitted)), 3)
 	case head == "":
 		if err := initWriteFiles(repo, root, "", project.Template(), map[string]string{project.ModelsPath: project.ModelsTemplate()}); err != nil {
 			return err
