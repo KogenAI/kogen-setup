@@ -1000,7 +1000,7 @@ func TestInitLeavesOutAFailingFixerAndKeepsAPassingOne(t *testing.T) {
 		"Acceptance: Cucumber bridge added in features/steps",
 		"Commit: {sha8} Add Kogen configuration")
 	for _, line := range []string{"kogen: checking ok: test -f README.md", "kogen: running fix-1: echo boom-fix >&2; exit 5\n  | boom-fix\nkogen: running fix-2: test -f README.md && test -r README.md"} {
-		if !strings.Contains(errs, line+"\n") {
+		if !strings.Contains(initWithoutEndLines(errs), line+"\n") {
 			t.Errorf("stderr lacks %q:\n%s", line, errs)
 		}
 	}

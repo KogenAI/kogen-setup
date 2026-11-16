@@ -1946,13 +1946,62 @@ func (g initCheckGuard) clean(repo *git.Repo, gitDir, clone string) error {
 	return initRestoreTracked(clone, g.snapshot, initTrackedChanged(g.paths, g.snapshot, current))
 }
 
+// initRunTime is one verification run: its label and its wall time in whole seconds.
+type initRunTime struct {
+	label   string
+	elapsed time.Duration
+}
+
+// initRunLog records the runs of one init verification and whether the budget stopped it.
+type initRunLog struct {
+	runs          []initRunTime
+	budgetStopped bool
+}
+
+// initTimedExec runs a verification command through initExec and prints its end line
+// right after it returns. capped says the remaining budget, not the per-command limit,
+// set the timeout; a timeout then is a budget stop.
+func initTimedExec(s *sys.Session, log *initRunLog, tools verify.Tools, label, command, dir string, timeout time.Duration, capped bool) (sys.Result, error) {
+	start := time.Now()
+	r, err := initExec(s, tools, command, dir, timeout)
+	if err != nil {
+		return r, err
+	}
+	elapsed := time.Since(start).Truncate(time.Second)
+	log.runs = append(log.runs, initRunTime{label: label, elapsed: elapsed})
+	if r.TimedOut {
+		s.Progress(fmt.Sprintf("kogen: %s timed out after %s", label, elapsed))
+		if capped {
+			log.budgetStopped = true
+		}
+	} else {
+		s.Progress(fmt.Sprintf("kogen: %s finished in %s (status %d)", label, elapsed, r.Status))
+	}
+	return r, nil
+}
+
+// initBudgetLine is the progress line a budget stop prints: the three longest runs,
+// longest first, equal times in run order. runs are given in run order.
+func initBudgetLine(runs []initRunTime, budget string) string {
+	sorted := append([]initRunTime(nil), runs...)
+	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].elapsed > sorted[j].elapsed })
+	if len(sorted) > 3 {
+		sorted = sorted[:3]
+	}
+	entries := make([]string, len(sorted))
+	for i, r := range sorted {
+		entries[i] = fmt.Sprintf("%s %s", r.label, r.elapsed)
+	}
+	return fmt.Sprintf("kogen: init time budget of %s used up; longest runs: %s", budget, strings.Join(entries, ", "))
+}
+
 // initRerunCheck runs a kept check once and leaves the copy as it found it.
-func initRerunCheck(s *sys.Session, in InitInput, repo *git.Repo, gitDir, clone string, tracked []string, check project.Check, timeout time.Duration) (r sys.Result, err error) {
+func initRerunCheck(s *sys.Session, in InitInput, repo *git.Repo, gitDir, clone string, tracked []string, check project.Check, label string, timeout time.Duration, capped bool, log *initRunLog) (r sys.Result, err error) {
 	guard, err := initGuardCheck(repo, gitDir, clone, tracked)
 	if err != nil {
 		return r, err
 	}
-	r, err = initExec(s, in.Tools, check.Run, clone, timeout)
+	r, err = initTimedExec(s, log, in.Tools, label, check.Run, clone, timeout, capped)
 	if cleanErr := guard.clean(repo, gitDir, clone); err == nil {
 		err = cleanErr
 	}
@@ -1966,6 +2015,7 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 	}
 	var res initResult
 	budget := initBudget{deadline: time.Now().Add(initVerifyLimit)}
+	log := &initRunLog{}
 	// Setup runs before every Build, so each entry must run twice on the same tree (SET-12).
 	for i, cmd := range candidates.Setup {
 		n := i + 1
@@ -1985,11 +2035,12 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 			}
 			timeout, capped, ok := budget.limit()
 			if !ok {
+				log.budgetStopped = true
 				res.leftOut = append(res.leftOut, budget.unverified(fmt.Sprintf("setup-%d", n), cmd))
 				return restore()
 			}
 			s.Progress(fmt.Sprintf("kogen: running setup-%d: %s", n, cmd))
-			r, err := initExec(s, in.Tools, cmd, clone, timeout)
+			r, err := initTimedExec(s, log, in.Tools, fmt.Sprintf("setup-%d", n), cmd, clone, timeout, capped)
 			if err != nil {
 				return err
 			}
@@ -2009,11 +2060,12 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 			firstChanged := initTrackedChanged(tracked, snapshot, firstSnapshot)
 			timeout, capped, ok = budget.limit()
 			if !ok {
+				log.budgetStopped = true
 				res.leftOut = append(res.leftOut, budget.unverified(fmt.Sprintf("setup-%d", n), cmd))
 				return restore()
 			}
 			s.Progress(fmt.Sprintf("kogen: running setup-%d again: %s", n, cmd))
-			again, err := initExec(s, in.Tools, cmd, clone, timeout)
+			again, err := initTimedExec(s, log, in.Tools, fmt.Sprintf("setup-%d again", n), cmd, clone, timeout, capped)
 			if err != nil {
 				return err
 			}
@@ -2080,15 +2132,18 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 			for run := 0; run < 2; run++ {
 				timeout, capped, ok := budget.limit()
 				if !ok {
+					log.budgetStopped = true
 					res.leftOut = append(res.leftOut, budget.unverified(check.Name, check.Run))
 					return nil
 				}
+				label := check.Name
 				if run == 0 {
 					s.Progress(fmt.Sprintf("kogen: checking %s: %s", check.Name, check.Run))
 				} else {
+					label += " again"
 					s.Progress(fmt.Sprintf("kogen: running %s again: %s", check.Name, check.Run))
 				}
-				r, err := initExec(s, in.Tools, check.Run, clone, timeout)
+				r, err := initTimedExec(s, log, in.Tools, label, check.Run, clone, timeout, capped)
 				if err != nil {
 					return err
 				}
@@ -2146,6 +2201,7 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 		err := func() error {
 			timeout, capped, ok := budget.limit()
 			if !ok {
+				log.budgetStopped = true
 				res.leftOut = append(res.leftOut, budget.unverified(name, cmd))
 				return nil
 			}
@@ -2165,7 +2221,7 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 				}
 			}
 			s.Progress(fmt.Sprintf("kogen: running %s: %s", name, cmd))
-			r, err := initExec(s, in.Tools, cmd, clone, timeout)
+			r, err := initTimedExec(s, log, in.Tools, name, cmd, clone, timeout, capped)
 			if err != nil {
 				return err
 			}
@@ -2191,11 +2247,12 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 			}
 			timeout, capped, ok = budget.limit()
 			if !ok {
+				log.budgetStopped = true
 				res.leftOut = append(res.leftOut, budget.unverified(name, cmd))
 				return restore()
 			}
 			s.Progress(fmt.Sprintf("kogen: running %s again: %s", name, cmd))
-			again, err := initExec(s, in.Tools, cmd, clone, timeout)
+			again, err := initTimedExec(s, log, in.Tools, name+" again", cmd, clone, timeout, capped)
 			if err != nil {
 				return err
 			}
@@ -2220,11 +2277,12 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 			for _, check := range res.checks {
 				timeout, capped, ok := budget.limit()
 				if !ok {
+					log.budgetStopped = true
 					res.leftOut = append(res.leftOut, budget.unverified(name, cmd))
 					return restore()
 				}
 				s.Progress(fmt.Sprintf("kogen: checking %s after %s: %s", check.Name, name, check.Run))
-				r, err := initRerunCheck(s, in, repo, gitDir, clone, tracked, check, timeout)
+				r, err := initRerunCheck(s, in, repo, gitDir, clone, tracked, check, fmt.Sprintf("%s after %s", check.Name, name), timeout, capped, log)
 				if err != nil {
 					return err
 				}
@@ -2241,6 +2299,9 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 		if err != nil {
 			return res, err
 		}
+	}
+	if log.budgetStopped {
+		s.Progress(initBudgetLine(log.runs, initDurationText(initVerifyLimit)))
 	}
 	return res, nil
 }

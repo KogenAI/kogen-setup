@@ -73,7 +73,7 @@ func TestInitLeavesOutAFixerWhoseSecondRunFails(t *testing.T) {
 	if !strings.Contains(out, "Fix: "+gone+"\n") || !strings.Contains(out, "Left out: fix-1 ("+once+") is not repeatable: its second run failed with status 3\n") {
 		t.Errorf("stdout:\n%s", out)
 	}
-	if !strings.Contains(progress, "kogen: running fix-1 again: "+once+"\n  | second-output\n") {
+	if !strings.Contains(initWithoutEndLines(progress), "kogen: running fix-1 again: "+once+"\n  | second-output\n") {
 		t.Errorf("progress:\n%s", progress)
 	}
 	if cfg := f.config(); !reflect.DeepEqual(cfg.Fix, []string{gone}) {

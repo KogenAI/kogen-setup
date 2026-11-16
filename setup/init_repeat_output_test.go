@@ -20,6 +20,7 @@ func TestInitRepeatFailureOutputAndIneligibleProgress(t *testing.T) {
 	if exit != 0 || err != nil {
 		t.Fatalf("exit %d err %v stdout %s progress %s", exit, err, out, progress)
 	}
+	progress = initWithoutEndLines(progress)
 	for _, want := range []string{
 		"kogen: running repeat again: " + repeat + "\n  | retry-output\n",
 		"kogen: running clean again: " + clean + "\n",

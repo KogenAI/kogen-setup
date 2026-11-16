@@ -91,6 +91,7 @@ func TestInitLeftOutOutputAndConfiguration(t *testing.T) {
 		"kogen: running setup-1: echo setup-out; echo setup-err >&2; exit 4\n  | setup-out\n  | setup-err\n",
 		"kogen: checking bad: echo check-out; echo check-err >&2; exit 7\n  | check-out\n  | check-err\n",
 	} {
+		stderr := initWithoutEndLines(stderr)
 		if !strings.Contains(stderr, block) {
 			t.Errorf("missing block %q in %q", block, stderr)
 		}
@@ -150,6 +151,7 @@ func TestInitFailedFixerOutputBoundaries(t *testing.T) {
 	f.write("README.md", "x\n")
 	f.commitAll("notes")
 	_, stderr := f.mustRun()
+	stderr = initWithoutEndLines(stderr)
 	for i, block := range blocks {
 		if i+1 < len(blocks) {
 			block += strings.SplitN(blocks[i+1], "\n", 2)[0] + "\n"

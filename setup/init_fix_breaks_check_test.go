@@ -35,7 +35,7 @@ func TestInitRerunsKeptChecksAfterEachFixerAndLeavesOutOneThatBreaksACheck(t *te
 		}
 	}
 	var after []string
-	for _, line := range strings.Split(progress, "\n") {
+	for _, line := range strings.Split(initWithoutEndLines(progress), "\n") {
 		if strings.Contains(line, " after fix-") {
 			after = append(after, line)
 		}
