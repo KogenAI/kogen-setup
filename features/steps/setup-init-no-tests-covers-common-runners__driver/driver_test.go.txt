@@ -1,0 +1,45 @@
+package setup
+
+import (
+	"encoding/json"
+	"os"
+	"testing"
+)
+
+func TestRunnersDriverClassify(t *testing.T) {
+	var outputs []string
+	if err := json.Unmarshal([]byte(os.Getenv("RUNNERS_OUTPUTS")), &outputs); err != nil {
+		t.Fatal(err)
+	}
+	answers := make([]bool, len(outputs))
+	for i, output := range outputs {
+		answers[i] = initRanNoTests(output)
+	}
+	data, err := json.Marshal(answers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(os.Getenv("RUNNERS_RESULT"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunnersDriverInit(t *testing.T) {
+	command := os.Getenv("RUNNERS_COMMAND")
+	f := initNewFx(t, true, initSubmit(map[string]any{
+		"setup": []any{}, "fix": []any{}, "checks": initCheckList("minitest", command), "protect": []any{},
+	}))
+	f.write("README.md", "x\n")
+	f.commitAll("notes")
+	exit, stdout, stderr, err := f.run("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(map[string]any{"exit": exit, "stdout": stdout, "stderr": stderr, "checks": len(f.config().Checks)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(os.Getenv("RUNNERS_RESULT"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}

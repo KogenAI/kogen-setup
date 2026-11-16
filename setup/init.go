@@ -72,8 +72,10 @@ var (
 	initCommandPartsRE   = regexp.MustCompile(`;|&&|\|\||\||\n`)
 	initNpmScriptRE      = regexp.MustCompile(`\bnpm\s+(?:run\s+)?([a-zA-Z0-9:_-]+)\b`)
 	initTerminatedRE     = regexp.MustCompile(`Terminated(?:: 15)?$`)
-	initNoTestsRE        = regexp.MustCompile(`(?m)(?:^\?[\t ]+\S+[\t ]+\[no test files\][\t ]*$|\b0 tests, 0 failures\b|\bRan 0 tests\b|\bNo tests found\b|\b0 passing\b)`)
-	initPositiveTestsRE  = regexp.MustCompile(`(?m)(?:\b0*[1-9][0-9]* tests\b|\bRan 0*[1-9][0-9]* tests\b|\b0*[1-9][0-9]* passing\b|^ok[\t ]+\S+|^PASS(?:[\t ]|$))`)
+	initNoTestsRE        = regexp.MustCompile(`(?m)(?:^\?[\t ]+\S+[\t ]+\[no test files\][\t ]*$|\b0 tests, 0 failures\b|\bRan 0 tests\b|\bNo tests found\b|\b0 passing\b|\b0 runs, 0 assertions\b|\b0 examples, 0 failures\b|\brunning 0 tests\b|^ok[\t ]+\S.*\[no tests to run\][\t ]*$)`)
+	initPositiveTestsRE  = regexp.MustCompile(`(?m)(?:\b0*[1-9][0-9]* (?:tests?|examples?|runs?)\b|\b0*[1-9][0-9]* passing\b|^PASS(?:[\t ]|$))`)
+	initGoOkLineRE       = regexp.MustCompile(`^ok[\t ]+\S`)
+	initGoNoTestsToRunRE = regexp.MustCompile(`\[no tests to run\][\t ]*$`)
 	initMixTaskRE        = regexp.MustCompile(`\bmix\s+([a-z][a-z0-9_.-]*)\b`)
 )
 
@@ -1769,7 +1771,16 @@ func initShellCommand(command string) string {
 
 // initRanNoTests classifies only recognized reports; positive evidence wins.
 func initRanNoTests(output string) bool {
-	return initNoTestsRE.MatchString(output) && !initPositiveTestsRE.MatchString(output)
+	if !initNoTestsRE.MatchString(output) || initPositiveTestsRE.MatchString(output) {
+		return false
+	}
+	// A Go "ok" line is positive evidence unless the package ran no tests.
+	for _, line := range strings.Split(output, "\n") {
+		if initGoOkLineRE.MatchString(line) && !initGoNoTestsToRunRE.MatchString(line) {
+			return false
+		}
+	}
+	return true
 }
 
 // initCommandFailure describes an unsuccessful verification command.
