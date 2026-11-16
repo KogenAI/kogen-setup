@@ -572,6 +572,31 @@ func initJSONString(s string) string {
 	return b.String()
 }
 
+// initInvalidMaxLines is how many problems the refusal lists; the rest are counted.
+const initInvalidMaxLines = 5
+
+// initInvalidError is the refusal when the model's last answer was not a valid configuration.
+// Its lines are the problems of that answer, at most initInvalidMaxLines and then a count of
+// the rest; no problems means the answer carried no usable call.
+func initInvalidError(problems []string) *sys.Error {
+	e := sys.Fail("provider", "init_invalid", "the model did not return a valid configuration; nothing was written", 4)
+	if len(problems) == 0 {
+		e.Lines = []string{"the last answer did not call submit_configuration"}
+		return e
+	}
+	if len(problems) > initInvalidMaxLines {
+		more := len(problems) - initInvalidMaxLines
+		noun := " more problems"
+		if more == 1 {
+			noun = " more problem"
+		}
+		e.Lines = append(slices.Clone(problems[:initInvalidMaxLines]), "and "+strconv.Itoa(more)+noun)
+		return e
+	}
+	e.Lines = slices.Clone(problems)
+	return e
+}
+
 // initConverse asks, and asks once more with the correction when the answer is missing or
 // invalid; a second failure ends init (provider/init_invalid).
 func initConverse(ctx context.Context, s *sys.Session, in InitInput, role provider.Role, input []any, vctx InitContext) (InitProposal, provider.Usage, error) {
@@ -604,7 +629,7 @@ func initConverse(ctx context.Context, s *sys.Session, in InitInput, role provid
 			}
 		}
 		if attempt == 2 {
-			return InitProposal{}, usage, sys.Fail("provider", "init_invalid", "the model did not return a valid configuration; nothing was written", 4)
+			return InitProposal{}, usage, initInvalidError(problems)
 		}
 		input = append(slices.Clone(input), tools.Replay(resp.Items)...)
 		if call == nil {

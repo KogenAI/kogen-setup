@@ -152,7 +152,9 @@ func initClaudeConverse(ctx context.Context, s *sys.Session, home string, role p
 	defer session.Close()
 	var rounds []executor.Usage
 	feedback := ""
+	var problems []string
 	for attempt := 0; attempt < 2; attempt++ {
+		problems = nil
 		result, err := session.Round(ctx, executor.Input{Feedback: feedback})
 		if err != nil {
 			return InitProposal{}, nil, err
@@ -160,7 +162,8 @@ func initClaudeConverse(ctx context.Context, s *sys.Session, home string, role p
 		rounds = append(rounds, result.Usage)
 		var args map[string]any
 		if json.Unmarshal(result.Structured, &args) == nil && args != nil {
-			proposal, problems := Validate(args, vctx)
+			var proposal InitProposal
+			proposal, problems = Validate(args, vctx)
 			if len(problems) == 0 {
 				return proposal, rounds, nil
 			}
@@ -169,7 +172,7 @@ func initClaudeConverse(ctx context.Context, s *sys.Session, home string, role p
 			feedback = "Answer with a valid configuration."
 		}
 	}
-	return InitProposal{}, rounds, sys.Fail("provider", "init_invalid", "the model did not return a valid configuration; nothing was written", 4)
+	return InitProposal{}, rounds, initInvalidError(problems)
 }
 
 // initClaudeUsageLine is the progress counters for the rounds that ran: their sum in the
