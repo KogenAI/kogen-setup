@@ -1633,7 +1633,7 @@ func TestInitSetupPreservesTrackedFiles(t *testing.T) {
 		{"mode", "chmod +x a.txt", "changed a.txt"},
 		{"existence", "rm -f a.txt", "changed a.txt"},
 		{"five", "printf y > e.txt; printf y > d.txt; printf y > c.txt; printf y > b.txt; printf y > a.txt", "changed a.txt, b.txt, c.txt, d.txt, e.txt"},
-		{"six", "printf y > f.txt; printf y > e.txt; printf y > d.txt; printf y > c.txt; printf y > b.txt; printf y > a.txt", "changed a.txt, b.txt, c.txt, d.txt, e.txt, ..."},
+		{"six", "printf y > f.txt; printf y > e.txt; printf y > d.txt; printf y > c.txt; printf y > b.txt; printf y > a.txt", "changed a.txt, b.txt, c.txt, d.txt, e.txt and 1 more"},
 		{"second failure", "grep -q y a.txt && exit 7; echo y >> a.txt", "is not repeatable: its second run failed with status 7"},
 		{"second change", "echo y >> a.txt", "is not repeatable: its second run changed a.txt"},
 	}

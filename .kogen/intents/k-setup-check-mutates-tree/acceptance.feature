@@ -21,5 +21,5 @@ Feature: Reject checks that rewrite tracked content
     When init verifies the mutation fixture
     Then the mutation observation is:
       """
-      {"lines":["Checks: ok2","Left out: fmt (for p in f.txt e.txt d.txt c.txt b.txt a.txt; do echo y > \"$p\"; done) changed a.txt, b.txt, c.txt, d.txt, e.txt, ..."],"checks":["ok2"],"a":"x\n"}
+      {"lines":["Checks: ok2","Left out: fmt (for p in f.txt e.txt d.txt c.txt b.txt a.txt; do echo y > \"$p\"; done) changed a.txt, b.txt, c.txt, d.txt, e.txt and 1 more"],"checks":["ok2"],"a":"x\n"}
       """

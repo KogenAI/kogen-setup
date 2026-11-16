@@ -2124,9 +2124,9 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 			case !initSameState(first, second):
 				initShowOutput(s, again.Output)
 				changed := initStateDiff(first, second)
-				res.leftOut = append(res.leftOut, fmt.Sprintf("setup-%d (%s) is not repeatable: its second run changed %s", n, cmd, strings.Join(changed, ", ")))
+				res.leftOut = append(res.leftOut, fmt.Sprintf("setup-%d (%s) is not repeatable: its second run changed %s", n, cmd, initPathList(changed)))
 			case len(firstChanged) > 0:
-				res.leftOut = append(res.leftOut, fmt.Sprintf("setup-%d (%s) changed %s", n, cmd, initChangedDisplay(firstChanged)))
+				res.leftOut = append(res.leftOut, fmt.Sprintf("setup-%d (%s) changed %s", n, cmd, initPathList(firstChanged)))
 			default:
 				if err := initRestoreTracked(clone, snapshot, initTrackedChanged(tracked, snapshot, secondSnapshot)); err != nil {
 					return err
@@ -2209,7 +2209,7 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 				}
 				if len(changed) > 0 {
 					sort.Strings(changed)
-					res.leftOut = append(res.leftOut, fmt.Sprintf("%s (%s) changed %s", check.Name, check.Run, initChangedDisplay(changed)))
+					res.leftOut = append(res.leftOut, fmt.Sprintf("%s (%s) changed %s", check.Name, check.Run, initPathList(changed)))
 					return nil
 				}
 				if initRanNoTests(r.Output) {
@@ -2273,7 +2273,7 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 				}
 				if changed := initTrackedChanged(candidates.Protect, protectBefore, protectAfter); len(changed) > 0 {
 					initShowOutput(s, r.Output)
-					res.leftOut = append(res.leftOut, fmt.Sprintf("%s (%s) changed protected %s", name, cmd, strings.Join(changed, ", ")))
+					res.leftOut = append(res.leftOut, fmt.Sprintf("%s (%s) changed protected %s", name, cmd, initPathList(changed)))
 					return restore()
 				}
 			}
@@ -2302,7 +2302,7 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 					return err
 				}
 				if !initSameState(first, second) {
-					failure = fmt.Sprintf("%s (%s) is not repeatable: its second run changed %s", name, cmd, strings.Join(initStateDiff(first, second), ", "))
+					failure = fmt.Sprintf("%s (%s) is not repeatable: its second run changed %s", name, cmd, initPathList(initStateDiff(first, second)))
 				}
 			}
 			if failure != "" {
@@ -2449,13 +2449,14 @@ func initRestoreTracked(clone string, snapshot map[string]initSavedFile, changed
 	return nil
 }
 
-func initChangedDisplay(changed []string) string {
-	suffix := ""
-	if len(changed) > 5 {
-		changed = changed[:5]
-		suffix = ", ..."
+// initPathList renders changed paths for a left-out entry: at most five, then
+// how many more there are.
+func initPathList(paths []string) string {
+	const shown = 5
+	if len(paths) <= shown {
+		return strings.Join(paths, ", ")
 	}
-	return strings.Join(changed, ", ") + suffix
+	return fmt.Sprintf("%s and %d more", strings.Join(paths[:shown], ", "), len(paths)-shown)
 }
 
 type initSavedFile struct {
