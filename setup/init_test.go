@@ -928,11 +928,11 @@ exit 3`)
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(got)), "\n")
-	if len(lines) != 3 || lines[0] != "tracked" || lines[1] != "deps" || strings.HasPrefix(lines[2], f.repo) {
+	if len(lines) != 4 || lines[0] != "tracked" || lines[1] != "deps" || lines[2] != "git" || strings.HasPrefix(lines[3], f.repo) {
 		t.Fatalf("copy saw %q", lines)
 	}
-	if _, err := os.Stat(lines[2]); err == nil {
-		t.Fatalf("copy %s was not removed", lines[2])
+	if _, err := os.Stat(lines[3]); err == nil {
+		t.Fatalf("copy %s was not removed", lines[3])
 	}
 }
 
@@ -1012,7 +1012,7 @@ func TestInitLeavesOutAFailingFixerAndKeepsAPassingOne(t *testing.T) {
 func TestInitRunsFixersAfterTheChecksOnTheCopy(t *testing.T) {
 	parallel(t)
 	rewrite := `echo rewritten > notes.txt`
-	again := `echo run > runs.txt && test ! -e .git && test -n "$KOGEN_NODE"`
+	again := `echo run > runs.txt && test -d .git && test -n "$KOGEN_NODE"`
 	f := initNewFx(t, true, initSubmit(map[string]any{
 		"setup": []any{}, "fix": []any{rewrite, again}, "checks": []any{map[string]any{"name": "same", "run": "grep -qx '# notes' README.md"}}, "protect": []any{}}))
 	f.write("README.md", "# notes\n")
@@ -1021,7 +1021,7 @@ func TestInitRunsFixersAfterTheChecksOnTheCopy(t *testing.T) {
 	initWantLines(t, out,
 		"Initialized Kogen in "+f.repo,
 		"Setup: none",
-		"Fix: echo rewritten > notes.txt; echo run > runs.txt && test ! -e .git && test -n \"$KOGEN_NODE\"",
+		"Fix: echo rewritten > notes.txt; echo run > runs.txt && test -d .git && test -n \"$KOGEN_NODE\"",
 		"Checks: same",
 		"Protect: none",
 		"Acceptance: Cucumber bridge added in features/steps",

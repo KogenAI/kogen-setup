@@ -1752,6 +1752,30 @@ func initCommittedCopy(s *sys.Session, repo *git.Repo, root, clone string, track
 		}
 		start = end
 	}
+	return initGitCopy(s, root, clone)
+}
+
+// initGitCopy makes clone a Git work tree whose HEAD tree is the committed tree of the
+// repository at root. The repository lives inside clone only: it is a fresh one with a
+// throwaway identity, no remote and no hooks, and HEAD is fetched from root by path (a
+// read-only fetch) and the index reset to it. It never links to root's own .git.
+func initGitCopy(s *sys.Session, root, clone string) error {
+	q := initShellQuote(clone)
+	script := git.UnsetPrefix() + "set -e; cd " + q + "; " +
+		"git init -q --template= . ; " +
+		"git config user.name 'Kogen Init'; " +
+		"git config user.email 'init@kogen.invalid'; " +
+		"git config commit.gpgsign false; " +
+		"git config core.hooksPath /dev/null; " +
+		"git fetch -q --no-tags " + initShellQuote(root) + " HEAD; " +
+		"git reset -q --mixed FETCH_HEAD"
+	res, err := s.Run(script, clone, sys.Options{KillGroupOnExit: true})
+	if err != nil {
+		return err
+	}
+	if res.Status != 0 {
+		return fmt.Errorf("making the init copy a Git work tree failed: %s", strings.TrimSpace(res.Output))
+	}
 	return nil
 }
 
@@ -1787,7 +1811,7 @@ func initExec(s *sys.Session, tools verify.Tools, command, dir string, timeout t
 			env[k] = v
 		}
 	}
-	r, err := s.Run(initShellCommand(command), dir, sys.Options{Env: env, KillGroupOnExit: true, Timeout: timeout})
+	r, err := s.Run(git.UnsetPrefix()+initShellCommand(command), dir, sys.Options{Env: env, KillGroupOnExit: true, Timeout: timeout})
 	if r.TimedOut {
 		r.Output = initTerminatedRE.ReplaceAllString(strings.TrimSuffix(r.Output, "\n"), "")
 	}
@@ -2417,6 +2441,9 @@ func initCheckDirs(repo *git.Repo, gitDir, clone string) ([]string, []string, er
 		rel, err := filepath.Rel(clone, name)
 		if err != nil {
 			return err
+		}
+		if rel == ".git" {
+			return filepath.SkipDir
 		}
 		if ignored[filepath.ToSlash(rel)] {
 			return filepath.SkipDir
