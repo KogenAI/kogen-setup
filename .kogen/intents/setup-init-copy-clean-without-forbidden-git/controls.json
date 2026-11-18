@@ -1,0 +1,1 @@
+{"deferred":"The correct implementation spans go.mod, go.sum, setup/init.go and a new Go test file, and the 15-minute shaping budget ended before its whole-file or patch controls could be written; a scratch run showed the Go-walk cleanup plus the go.mod bump passes the five TestInitCheckCleanup tests, and the Build writes the implementation."}

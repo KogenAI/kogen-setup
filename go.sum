@@ -1,11 +1,9 @@
-github.com/KogenAI/kogen-coordinator v0.0.0-20261106110407-d74daae36f56 h1:8VmqsU9EArCYwqOTw8e9uuS54nRSlUHSUaDl8W+lYqs=
-github.com/KogenAI/kogen-coordinator v0.0.0-20261106110407-d74daae36f56/go.mod h1:MMc15p3YwlY71dMxfCdX6QlR2jXJbSxL6YA9Y7971c8=
-github.com/KogenAI/kogen-executor v0.0.0-20261108021340-12bb6262e745 h1:wFvV3TC86uh9yXK/mdk8Ks6FosCPTVW6+lOKbGG2hR4=
-github.com/KogenAI/kogen-executor v0.0.0-20261108021340-12bb6262e745/go.mod h1:dpPbIVCNEfFubxLT6iw/yCDVRO0ltgHm6d5ET6nV4hs=
+github.com/KogenAI/kogen-coordinator v0.0.0-20261118001611-e643661cb646 h1:RM+u4Knrj+H7xlghv61lfBXYni+Pk4Mi6OtZMwq3hjc=
+github.com/KogenAI/kogen-coordinator v0.0.0-20261118001611-e643661cb646/go.mod h1:SR9BBvnCfFrNHnL7J3D9lCicIubivffh21/q/4TXIFk=
 github.com/KogenAI/kogen-executor v0.0.0-20261109224447-6396bc976408 h1:cPW9PReyZWX9A2/2EmD7mnc3O9uH1FhSP9fQt9ODfvU=
 github.com/KogenAI/kogen-executor v0.0.0-20261109224447-6396bc976408/go.mod h1:dpPbIVCNEfFubxLT6iw/yCDVRO0ltgHm6d5ET6nV4hs=
-github.com/KogenAI/kogen-loop v0.0.0-20261104031734-708a69af07b8 h1:GKOPO0Z8h2zCb16I14HCFhvb133qZM8ixoBjEDVAWQ0=
-github.com/KogenAI/kogen-loop v0.0.0-20261104031734-708a69af07b8/go.mod h1:yPduvTAVdxH5egqW82Uis/ZhemRb5gNSdzTll/f6bG0=
+github.com/KogenAI/kogen-loop v0.0.0-20261111104243-16bc90355dfb h1:oICLvgo6hCyVYKztkJ0wTgY8Q9eSvSgIHxlEfe065dM=
+github.com/KogenAI/kogen-loop v0.0.0-20261111104243-16bc90355dfb/go.mod h1:yPduvTAVdxH5egqW82Uis/ZhemRb5gNSdzTll/f6bG0=
 github.com/KogenAI/kogen-verification v0.0.0-20261104033953-b7d89bf3b513 h1:kD5v0imGdFyLkQiiE9lnhbElprXwdNvw6Cp9UXDH2HA=
 github.com/KogenAI/kogen-verification v0.0.0-20261104033953-b7d89bf3b513/go.mod h1:a434oUbU/VdUlUld0N+kUL4k7ZaEdVummnkHaPyDCiU=
 golang.org/x/text v0.43.0 h1:1QivrlhwAsnMOcqgOdl9my7s9OyZl8O5/UGUTJVXoWc=

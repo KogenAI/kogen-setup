@@ -1989,16 +1989,54 @@ func initGuardCheck(repo *git.Repo, gitDir, clone string, tracked []string) (ini
 	return g, err
 }
 
-// clean removes what the check created and restores the files it changed.
-func (g initCheckGuard) clean(repo *git.Repo, gitDir, clone string) error {
-	args := []string{"--git-dir=" + gitDir, "--work-tree=" + clone, "clean", "-ffdx"}
+// clean removes what the check created and restores the files it changed. It walks the
+// init copy itself: untracked and ignored files and directories go, except the retained
+// paths, and no Git command is involved.
+func (g initCheckGuard) clean(clone string) error {
+	keep := make(map[string]bool, len(g.paths))
+	for _, p := range g.paths {
+		keep[filepath.ToSlash(filepath.Clean(p))] = true
+	}
+	protected := make(map[string]bool, len(g.ignored))
 	for _, p := range g.ignored {
-		args = append(args, "-e", "/"+strings.NewReplacer(`\`, `\\`, `*`, `\*`, `?`, `\?`, `[`, `\[`).Replace(p))
+		protected[filepath.ToSlash(filepath.Clean(strings.TrimSuffix(p, "/")))] = true
 	}
-	r, err := repo.Observing().RunEnv([]string{"GIT_OPTIONAL_LOCKS=0"}, args...)
-	if err == nil && r.Status != 0 {
-		err = fmt.Errorf("git clean in the init copy failed (status %d): %s", r.Status, strings.TrimSpace(r.Stderr))
+	dirs := make(map[string]bool, len(g.dirs))
+	for _, d := range g.dirs {
+		dirs[filepath.ToSlash(filepath.Clean(d))] = true
 	}
+	err := filepath.WalkDir(clone, func(name string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if name == clone {
+			return nil
+		}
+		rel, err := filepath.Rel(clone, name)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if rel == ".git" || protected[rel] {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if entry.IsDir() {
+			if dirs[rel] {
+				return nil
+			}
+			if err := os.RemoveAll(name); err != nil {
+				return err
+			}
+			return filepath.SkipDir
+		}
+		if keep[rel] {
+			return nil
+		}
+		return os.Remove(name)
+	})
 	if err != nil {
 		return err
 	}
@@ -2070,7 +2108,7 @@ func initRerunCheck(s *sys.Session, in InitInput, repo *git.Repo, gitDir, clone 
 		return r, err
 	}
 	r, err = initTimedExec(s, log, in.Tools, label, check.Run, clone, timeout, capped)
-	if cleanErr := guard.clean(repo, gitDir, clone); err == nil {
+	if cleanErr := guard.clean(clone); err == nil {
 		err = cleanErr
 	}
 	return r, err
@@ -2193,7 +2231,7 @@ func initVerify(ctx context.Context, s *sys.Session, in InitInput, repo *git.Rep
 			}
 			before, snapshot := guard.before, guard.snapshot
 			defer func() {
-				if err := guard.clean(repo, gitDir, clone); resultErr == nil {
+				if err := guard.clean(clone); resultErr == nil {
 					resultErr = err
 				}
 			}()
