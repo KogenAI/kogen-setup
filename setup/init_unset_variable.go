@@ -54,6 +54,13 @@ func initUnsetVariables(command string, env []string) []string {
 		}
 		atBoundary := boundary
 		boundary = isSpace(c) || c == ';' || c == '&' || c == '|' || c == '(' || c == ')'
+		if atBoundary && !double && c == '#' {
+			// An unquoted word-initial # starts a comment that runs to the next newline.
+			for i+1 < len(command) && command[i+1] != '\n' {
+				i++
+			}
+			continue
+		}
 		if atBoundary {
 			if n := name(i); n != "" && i+len(n) < len(command) && command[i+len(n)] == '=' {
 				set[n] = true

@@ -34,6 +34,19 @@ func TestValidateUnsetVariables(t *testing.T) {
 		{"mkdir $UNSET_ONE $UNSET_TWO $UNSET_ONE", []string{"UNSET_ONE", "UNSET_TWO"}},
 		{"cd \"${UNSET_TWO}\" && mkdir $UNSET_ONE", []string{"UNSET_TWO", "UNSET_ONE"}},
 		{"go test ./...", nil},
+		{"mkdir ok # $UNSET_ONE", nil},
+		{"mkdir ok #$UNSET_ONE ${UNSET_TWO}", nil},
+		{"# $UNSET_ONE", nil},
+		{"mkdir ok # UNSET_ONE=x; mkdir $UNSET_TWO", nil},
+		{"mkdir $UNSET_ONE # $UNSET_TWO", []string{"UNSET_ONE"}},
+		{"mkdir $UNSET_ONE; # comment", []string{"UNSET_ONE"}},
+		{"mkdir $UNSET_ONE # $SET_ONE", []string{"UNSET_ONE"}},
+		{"mkdir \"a # b\" $UNSET_ONE", []string{"UNSET_ONE"}},
+		{"mkdir 'a # b' $UNSET_ONE", []string{"UNSET_ONE"}},
+		{"mkdir \"# $UNSET_ONE\"", []string{"UNSET_ONE"}},
+		{"mkdir a#b $UNSET_ONE", []string{"UNSET_ONE"}},
+		{"mkdir \\# $UNSET_ONE", []string{"UNSET_ONE"}},
+		{"mkdir $# ${#} $UNSET_ONE", []string{"UNSET_ONE"}},
 	}
 	for _, role := range []string{"setup", "fix", "check"} {
 		for _, tc := range cases {
@@ -61,6 +74,14 @@ func TestValidateUnsetVariables(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// Validate refuses commands containing newlines, so a comment's end is only observable here.
+func TestInitUnsetVariablesCommentEndsAtNewline(t *testing.T) {
+	got := initUnsetVariables("mkdir ok # $UNSET_ONE\nmkdir $UNSET_TWO\n# $UNSET_THREE\nmkdir $UNSET_ONE", []string{"SET_ONE=1"})
+	if want := []string{"UNSET_TWO", "UNSET_ONE"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %q, want %q", got, want)
 	}
 }
 
