@@ -55,19 +55,25 @@ func initSnapshot(root string, paths []string) ([]initIntegrityFile, error) {
 }
 
 // initRefuseSymlinks refuses when a symbolic link sits at one of the files init would
-// write: os.WriteFile follows it and would modify a file outside the checkout.
+// write or at a directory above it inside the checkout: writing follows it and would
+// modify a file outside the checkout. It names the first symbolic link found, walking
+// each path from the checkout root down and stopping at the first missing component.
 func initRefuseSymlinks(root string, paths []string) error {
 	for _, p := range paths {
-		info, err := os.Lstat(filepath.Join(root, p))
-		if os.IsNotExist(err) {
-			continue
-		}
-		if err != nil {
-			return err
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			return sys.Fail("environment", "symlink_target",
-				p+" is a symbolic link; init does not write through it, replace it with a regular file or remove it, then run kogen init", 5)
+		parts := strings.Split(filepath.ToSlash(filepath.Clean(p)), "/")
+		for i := range parts {
+			rel := filepath.FromSlash(strings.Join(parts[:i+1], "/"))
+			info, err := os.Lstat(filepath.Join(root, rel))
+			if os.IsNotExist(err) {
+				break
+			}
+			if err != nil {
+				return err
+			}
+			if info.Mode()&os.ModeSymlink != 0 {
+				return sys.Fail("environment", "symlink_target",
+					rel+" is a symbolic link; init does not write through it, replace it with a regular file or directory or remove it, then run kogen init", 5)
+			}
 		}
 	}
 	return nil

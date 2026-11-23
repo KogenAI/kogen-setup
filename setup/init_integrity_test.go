@@ -396,3 +396,64 @@ func TestInitRegularWriteTargetsStillCommitted(t *testing.T) {
 		t.Fatal("gitignore line lost")
 	}
 }
+
+func TestInitRefusesSymlinkedParentDirectory(t *testing.T) {
+	// Untracked .kogen symlink to an empty outside directory: no write target exists there.
+	f := initNewFx(t, true, initNothing())
+	f.write("README.md", "# fixture\n")
+	f.commitAll("initial")
+	outside := filepath.Join(filepath.Dir(f.repo), "outside-kogen-empty")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(f.repo, ".kogen")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	head, status := f.head(), f.dirtyPaths()
+	e := f.wantError("environment", "symlink_target", 5)
+	if !strings.Contains(e.Error(), ".kogen is a symbolic link") {
+		t.Fatalf("error does not name .kogen: %v", e)
+	}
+	if got, err := os.Readlink(link); err != nil || got != outside {
+		t.Fatalf("symlink %q %v", got, err)
+	}
+	if entries, err := os.ReadDir(outside); err != nil || len(entries) != 0 {
+		t.Fatalf("outside directory changed: %v %v", entries, err)
+	}
+	if f.head() != head || f.dirtyPaths() != status {
+		t.Fatalf("repository changed: %q -> %q", status, f.dirtyPaths())
+	}
+	if f.exists(".gitignore") || len(f.requests()) != 0 {
+		t.Fatal("init wrote or requested after refusal")
+	}
+
+	// Tracked .kogen symlink to a non-empty outside directory.
+	g := initNewFx(t, true, initNothing())
+	outside = filepath.Join(filepath.Dir(g.repo), "outside-kogen-full")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outside, "keep.txt"), []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link = filepath.Join(g.repo, ".kogen")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	g.commitAll("initial")
+	head, status = g.head(), g.dirtyPaths()
+	e = g.wantError("environment", "symlink_target", 5)
+	if !strings.Contains(e.Error(), ".kogen is a symbolic link") {
+		t.Fatalf("error does not name .kogen: %v", e)
+	}
+	if got, err := os.Readlink(link); err != nil || got != outside {
+		t.Fatalf("symlink %q %v", got, err)
+	}
+	if entries, err := os.ReadDir(outside); err != nil || len(entries) != 1 || entries[0].Name() != "keep.txt" {
+		t.Fatalf("outside directory changed: %v %v", entries, err)
+	}
+	if g.head() != head || g.dirtyPaths() != status {
+		t.Fatalf("repository changed: %q -> %q", status, g.dirtyPaths())
+	}
+}
