@@ -33,7 +33,14 @@ func main() {
 		os.Exit(claudecode.RunHook(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
 	}
 	if len(os.Args) != 2 {
-		fmt.Fprintln(os.Stderr, "usage: kogen-setup <checkout>")
+		message := "usage: kogen-setup <checkout>"
+		fmt.Fprintln(os.Stderr, message)
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetEscapeHTML(false)
+		if err := enc.Encode(result{Exit: 2, Error: &message}); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 		os.Exit(2)
 	}
 	env := os.Environ()

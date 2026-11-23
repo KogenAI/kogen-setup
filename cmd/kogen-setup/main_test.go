@@ -118,8 +118,9 @@ func TestUsageWithoutExactlyOneCheckout(t *testing.T) {
 			if got.stderr != usageLine {
 				t.Errorf("stderr = %q, want %q", got.stderr, usageLine)
 			}
-			if got.stdout != "" {
-				t.Errorf("stdout = %q, want empty", got.stdout)
+			want := `{"exit":2,"configuration":null,"error":"usage: kogen-setup <checkout>"}` + "\n"
+			if got.stdout != want {
+				t.Errorf("stdout = %q, want %q", got.stdout, want)
 			}
 		})
 	}
