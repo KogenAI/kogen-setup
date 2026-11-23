@@ -152,6 +152,13 @@ func initRun(ctx context.Context, s *sys.Session, in InitInput) error {
 			return nil
 		}
 	}
+	writes := []string{project.ConfigPath, ".gitignore"}
+	if !modelsExist {
+		writes = append(writes, project.ModelsPath)
+	}
+	if err := initRefuseSymlinks(root, writes); err != nil {
+		return err
+	}
 	paths := []string{project.ConfigPath, project.ModelsPath, ".gitignore", initStepsReadmePath}
 	dirty, err := repo.ChangedPaths(paths...)
 	if err != nil {

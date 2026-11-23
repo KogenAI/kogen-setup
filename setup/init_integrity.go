@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"github.com/KogenAI/kogen-coordinator/project"
+	"github.com/KogenAI/kogen-loop/sys"
 )
 
 type initIntegrityFile struct {
@@ -52,6 +53,26 @@ func initSnapshot(root string, paths []string) ([]initIntegrityFile, error) {
 	}
 	return append(saved, dirs...), nil
 }
+
+// initRefuseSymlinks refuses when a symbolic link sits at one of the files init would
+// write: os.WriteFile follows it and would modify a file outside the checkout.
+func initRefuseSymlinks(root string, paths []string) error {
+	for _, p := range paths {
+		info, err := os.Lstat(filepath.Join(root, p))
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return sys.Fail("environment", "symlink_target",
+				p+" is a symbolic link; init does not write through it, replace it with a regular file or remove it, then run kogen init", 5)
+		}
+	}
+	return nil
+}
+
 func initRestore(root string, saved []initIntegrityFile) error {
 	var first error
 	var dirs []string

@@ -166,8 +166,8 @@ func TestInitFailedWriteRemovesNewDirectories(t *testing.T) {
 			f.write("README.md", "# fixture\n")
 			f.commitAll("initial")
 			f.write(".git/info/exclude", ".gitignore\n")
-			missing := filepath.Join(filepath.Dir(f.repo), "missing", "gitignore")
-			if err := os.Symlink(missing, filepath.Join(f.repo, ".gitignore")); err != nil {
+			// An empty directory at .gitignore makes writing it fail.
+			if err := os.Mkdir(filepath.Join(f.repo, ".gitignore"), 0o755); err != nil {
 				t.Fatal(err)
 			}
 			if tc.preDir {
@@ -292,5 +292,107 @@ func TestInitRestoreFailureAfterWrittenConfigMismatch(t *testing.T) {
 	exit, _, _, err := f.run("")
 	if exit != 3 || err == nil || !strings.Contains(err.Error(), "loading written configuration") || !strings.Contains(err.Error(), "restoring files") {
 		t.Fatalf("exit %d err %v", exit, err)
+	}
+}
+
+// initSymlinkOutside makes a file outside the repository and a symlink to it at path.
+func initSymlinkOutside(t *testing.T, f *initFx, path, content string) (link, target string) {
+	t.Helper()
+	target = filepath.Join(filepath.Dir(f.repo), "outside-"+strings.ReplaceAll(path, "/", "-"))
+	if content != "" {
+		if err := os.WriteFile(target, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	link = filepath.Join(f.repo, path)
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	return link, target
+}
+
+func initWantSymlinkRefusal(t *testing.T, f *initFx, link, target, content, path string, commits bool) {
+	t.Helper()
+	head, status := "", f.dirtyPaths()
+	if commits {
+		head = f.head()
+	}
+	e := f.wantError("environment", "symlink_target", 5)
+	if !strings.Contains(e.Error(), path+" is a symbolic link") {
+		t.Fatalf("error does not name %s: %v", path, e)
+	}
+	if got, err := os.Readlink(link); err != nil || got != target {
+		t.Fatalf("symlink %q %v", got, err)
+	}
+	if b, err := os.ReadFile(target); content == "" && !os.IsNotExist(err) || content != "" && (err != nil || string(b) != content) {
+		t.Fatalf("target %q %v", b, err)
+	}
+	if commits && f.head() != head || f.dirtyPaths() != status {
+		t.Fatalf("repository changed: %q -> %q", status, f.dirtyPaths())
+	}
+	if f.exists(project.ConfigPath) && path != project.ConfigPath {
+		t.Fatal("project.yaml was written")
+	}
+}
+
+func TestInitRefusesSymlinkedGitignoreBeforeWriting(t *testing.T) {
+	f := initNewFx(t, true, initNothing())
+	link, target := initSymlinkOutside(t, f, ".gitignore", "outside")
+	initWantSymlinkRefusal(t, f, link, target, "outside", ".gitignore", false)
+	if f.exists(project.ModelsPath) {
+		t.Fatal("models.yaml was written")
+	}
+	if len(f.requests()) != 0 {
+		t.Fatal("a model request was made")
+	}
+}
+
+func TestInitRefusesSymlinkAtOtherWriteTarget(t *testing.T) {
+	// A tracked dangling symlink at models.yaml: init would write through it.
+	f := initNewFx(t, true, initNothing())
+	f.write("README.md", "# fixture\n")
+	link, target := initSymlinkOutside(t, f, project.ModelsPath, "")
+	f.commitAll("initial")
+	initWantSymlinkRefusal(t, f, link, target, "", project.ModelsPath, true)
+	if f.exists(project.ConfigPath) {
+		t.Fatal("project.yaml was written")
+	}
+
+	// An untracked symlink at project.yaml, to a valid configuration.
+	g := initNewFx(t, true, initNothing())
+	g.write("README.md", "# fixture\n")
+	g.commitAll("initial")
+	link, target = initSymlinkOutside(t, g, project.ConfigPath, project.Template())
+	initWantSymlinkRefusal(t, g, link, target, project.Template(), project.ConfigPath, true)
+
+	// An existing models.yaml symlink to an existing file is only read and stays accepted.
+	h := initNewFx(t, true, initNothing())
+	h.write("README.md", "# fixture\n")
+	link, target = initSymlinkOutside(t, h, project.ModelsPath, project.ModelsTemplate())
+	h.commitAll("initial")
+	h.mustRun()
+	if got, err := os.Readlink(link); err != nil || got != target {
+		t.Fatalf("symlink %q %v", got, err)
+	}
+	if !h.exists(project.ConfigPath) {
+		t.Fatal("project.yaml not written")
+	}
+}
+
+func TestInitRegularWriteTargetsStillCommitted(t *testing.T) {
+	f := initNewFx(t, true)
+	f.write(".gitignore", "node_modules/\n")
+	f.mustRun()
+	files := strings.Join(f.commitFiles(), " ")
+	for _, want := range []string{".gitignore", project.ConfigPath, project.ModelsPath} {
+		if !strings.Contains(files, want) {
+			t.Fatalf("commit files %q lack %s", files, want)
+		}
+	}
+	if !strings.Contains(f.read(".gitignore"), "node_modules/") {
+		t.Fatal("gitignore line lost")
 	}
 }
