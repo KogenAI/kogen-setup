@@ -1,0 +1,87 @@
+{
+  "correct": {
+    "files": {
+      "setup/init_remote_host.go": {
+        "patch": "--- a/setup/init_remote_host.go\n+++ b/setup/init_remote_host.go\n@@ -16,7 +16,17 @@\n // only literal command words and literal targets, skipping the transparent literal\n // prefixes sudo, env, command and time; anything else names no host.\n func initContactsRemoteHost(command string) bool {\n-\tfor _, words := range initCommandParts(command) {\n+\touter, _, nested := initScanRemoteSubstitutions(command, false, false)\n+\treturn nested || initPartsContactRemoteHost(initCommandParts(outer))\n+}\n+\n+func initContactsRemoteHostInSubstitution(command string) bool {\n+\t_, _, nested := initScanRemoteSubstitutions(command, false, false)\n+\treturn nested\n+}\n+\n+func initPartsContactRemoteHost(parts [][]string) bool {\n+\tfor _, words := range parts {\n \t\tfor len(words) > 0 && (words[0] == \"sudo\" || words[0] == \"env\" || words[0] == \"command\" || words[0] == \"time\") {\n \t\t\twords = words[1:]\n \t\t}\n@@ -43,6 +53,107 @@\n \t\t}\n \t}\n \treturn false\n+}\n+\n+// initScanRemoteSubstitutions discovers literal shell substitutions without expanding\n+// any word. It masks each completed substitution in the parent so that its text is\n+// classified only in its own command context. end is the matching close, when wanted.\n+func initScanRemoteSubstitutions(src string, paren, inSubstitution bool) (outer string, end int, remote bool) {\n+\tvar out strings.Builder\n+\tvar quote byte\n+\tvar groupDepth int\n+\twordStart := true\n+\tfor i := 0; i < len(src); i++ {\n+\t\tc := src[i]\n+\t\trest := src[i+1:]\n+\t\tswitch {\n+\t\tcase quote == '\\'':\n+\t\t\tif c == quote {\n+\t\t\t\tquote = 0\n+\t\t\t}\n+\t\tcase c == '\\\\' && len(rest) > 0 && (quote == 0 || strings.ContainsRune(\"$`\\\"\\\\\\n\", rune(rest[0]))):\n+\t\t\tout.WriteString(src[i : i+2])\n+\t\t\tif rest[0] != '\\n' {\n+\t\t\t\twordStart = false\n+\t\t\t}\n+\t\t\ti++\n+\t\t\tcontinue\n+\t\tcase c == '\"':\n+\t\t\tif quote == '\"' {\n+\t\t\t\tquote = 0\n+\t\t\t} else {\n+\t\t\t\tquote = '\"'\n+\t\t\t}\n+\t\tcase quote == 0 && c == '\\'':\n+\t\t\tquote = c\n+\t\tcase quote == 0 && c == '#' && wordStart:\n+\t\t\tn := strings.IndexByte(src[i:], '\\n')\n+\t\t\tif n < 0 {\n+\t\t\t\tn = len(src) - i\n+\t\t\t}\n+\t\t\tif !inSubstitution {\n+\t\t\t\tout.WriteString(src[i : i+n])\n+\t\t\t}\n+\t\t\ti += n - 1\n+\t\t\tcontinue\n+\t\tcase c == '$' && strings.HasPrefix(rest, \"$\"):\n+\t\t\tout.WriteString(\"$$\")\n+\t\t\ti++\n+\t\t\twordStart = false\n+\t\t\tcontinue\n+\t\tcase c == '$' && strings.HasPrefix(rest, \"(\"):\n+\t\t\tbody, n, deeper := initScanRemoteSubstitutions(src[i+2:], true, true)\n+\t\t\tif n < 0 {\n+\t\t\t\tout.WriteString(src[i:])\n+\t\t\t\treturn out.String(), -1, remote\n+\t\t\t}\n+\t\t\t// Arithmetic expansion is not a command, but may contain one.\n+\t\t\tremote = remote || deeper || (!strings.HasPrefix(rest, \"((\") && initPartsContactRemoteHost(initCommandParts(body)))\n+\t\t\tout.WriteString(\"$()\")\n+\t\t\ti += n + 2\n+\t\t\twordStart = false\n+\t\t\tcontinue\n+\t\tcase c == '`':\n+\t\t\tif raw, n := initBackquoteBody(rest); n >= 0 {\n+\t\t\t\tbody, _, deeper := initScanRemoteSubstitutions(raw, false, true)\n+\t\t\t\tremote = remote || deeper || initPartsContactRemoteHost(initCommandParts(body))\n+\t\t\t\tout.WriteString(\"$()\")\n+\t\t\t\ti += n + 1\n+\t\t\t\twordStart = false\n+\t\t\t\tcontinue\n+\t\t\t}\n+\t\tcase quote == 0 && c == '(':\n+\t\t\tgroupDepth++\n+\t\tcase quote == 0 && c == ')':\n+\t\t\tif groupDepth > 0 {\n+\t\t\t\tgroupDepth--\n+\t\t\t} else if paren {\n+\t\t\t\treturn out.String(), i, remote\n+\t\t\t}\n+\t\t}\n+\t\tout.WriteByte(c)\n+\t\twordStart = quote == 0 && strings.ContainsRune(\" \\t\\n;|&()<>\", rune(c))\n+\t}\n+\treturn out.String(), -1, remote\n+}\n+\n+func initBackquoteBody(src string) (string, int) {\n+\tvar body strings.Builder\n+\tfor i := 0; i < len(src); i++ {\n+\t\tc := src[i]\n+\t\tif c == '`' {\n+\t\t\treturn body.String(), i\n+\t\t}\n+\t\tif c == '\\\\' && i+1 < len(src) && strings.ContainsRune(\"$`\\\\\\n\", rune(src[i+1])) {\n+\t\t\ti++\n+\t\t\tc = src[i]\n+\t\t\tif c == '\\n' {\n+\t\t\t\tcontinue\n+\t\t\t}\n+\t\t}\n+\t\tbody.WriteByte(c)\n+\t}\n+\treturn \"\", -1\n }\n \n // initCommandParts splits command outside quotes on ; & | and newline into whitespace\n"
+      },
+      "setup/init.go": {
+        "patch": "--- a/setup/init.go\n+++ b/setup/init.go\n@@ -895,6 +895,9 @@\n \t\tif initPublishesOrDeploys(command) {\n \t\t\tproblems = append(problems, \"setup command \"+command+\" publishes or deploys\")\n \t\t}\n+\t\tif initContactsRemoteHostInSubstitution(command) {\n+\t\t\tproblems = append(problems, \"setup command \"+command+\" contacts a remote host\")\n+\t\t}\n \t\tif ctx.Env != nil {\n \t\t\tfor _, name := range initUnsetVariables(command, ctx.Env) {\n \t\t\t\tproblems = append(problems, \"setup command \"+command+\" references variable \"+name+\", which is not set in the init environment; use a literal value or a project path instead\")\n"
+      },
+      "setup/init_remote_host_test.go": {
+        "patch": "--- a/setup/init_remote_host_test.go\n+++ b/setup/init_remote_host_test.go\n@@ -7,6 +7,13 @@\n \t\tcommand string\n \t\tremote  bool\n \t}{\n+\t\t{`printf '%s' $(curl https://example.invalid/health)`, true},\n+\t\t{`printf '%s' $(curl http://localhost:8080/health)`, false},\n+\t\t{`printf '%s' '$(curl https://example.invalid/health)'`, false},\n+\t\t{`printf '%s' \"\\$(curl https://example.invalid/health)\"`, false},\n+\t\t{`printf '%s' \"$(curl 'https://example.invalid/health')\"`, true},\n+\t\t{\"printf '%s' `curl https://example.invalid/health`\", true},\n+\t\t{`printf '%s' \"$(printf '%s' \"$(curl https://example.invalid/health)\")\"`, true},\n \t\t{\"curl -fsS https://api.example.invalid/health\", true},\n \t\t{\"curl -fsS \\\"https://api.example.invalid/health\\\"\", true},\n \t\t{\"wget https://example.invalid/x -O x\", true},\n"
+      }
+    }
+  },
+  "wrong": [
+    {
+      "name": "Look only at top-level parts for checks and fixes",
+      "scenario": "Refuse a remote substitution in a check",
+      "step": "Then init-detect-nested-network-commands: the problems are:",
+      "files": {
+        "setup/init_remote_host.go": {
+          "patch": "--- a/setup/init_remote_host.go\n+++ b/setup/init_remote_host.go\n@@ -16,8 +16,7 @@\n // only literal command words and literal targets, skipping the transparent literal\n // prefixes sudo, env, command and time; anything else names no host.\n func initContactsRemoteHost(command string) bool {\n-\touter, _, nested := initScanRemoteSubstitutions(command, false, false)\n-\treturn nested || initPartsContactRemoteHost(initCommandParts(outer))\n+\treturn initPartsContactRemoteHost(initCommandParts(command))\n }\n \n func initContactsRemoteHostInSubstitution(command string) bool {\n"
+        }
+      }
+    },
+    {
+      "name": "Treat any URL inside the substitution as remote",
+      "scenario": "Allow a substitution that contacts only localhost",
+      "step": "Then init-detect-nested-network-commands: the problems are:",
+      "files": {
+        "setup/init_remote_host.go": {
+          "patch": "--- a/setup/init_remote_host.go\n+++ b/setup/init_remote_host.go\n@@ -108,7 +108,7 @@\n \t\t\t\treturn out.String(), -1, remote\n \t\t\t}\n \t\t\t// Arithmetic expansion is not a command, but may contain one.\n-\t\t\tremote = remote || deeper || (!strings.HasPrefix(rest, \"((\") && initPartsContactRemoteHost(initCommandParts(body)))\n+\t\t\tremote = remote || deeper || (!strings.HasPrefix(rest, \"((\") && (strings.Contains(body, \"://\") || initPartsContactRemoteHost(initCommandParts(body))))\n \t\t\tout.WriteString(\"$()\")\n \t\t\ti += n + 2\n \t\t\twordStart = false\n@@ -116,7 +116,7 @@\n \t\tcase c == '`':\n \t\t\tif raw, n := initBackquoteBody(rest); n >= 0 {\n \t\t\t\tbody, _, deeper := initScanRemoteSubstitutions(raw, false, true)\n-\t\t\t\tremote = remote || deeper || initPartsContactRemoteHost(initCommandParts(body))\n+\t\t\t\tremote = remote || deeper || (strings.Contains(body, \"://\") || initPartsContactRemoteHost(initCommandParts(body)))\n \t\t\t\tout.WriteString(\"$()\")\n \t\t\t\ti += n + 1\n \t\t\t\twordStart = false\n"
+        }
+      }
+    },
+    {
+      "name": "Search inside literal single-quoted strings",
+      "scenario": "Ignore single-quoted substitution text",
+      "step": "Then init-detect-nested-network-commands: the problems are:",
+      "files": {
+        "setup/init_remote_host.go": {
+          "patch": "--- a/setup/init_remote_host.go\n+++ b/setup/init_remote_host.go\n@@ -67,7 +67,7 @@\n \t\tc := src[i]\n \t\trest := src[i+1:]\n \t\tswitch {\n-\t\tcase quote == '\\'':\n+\t\tcase quote == '\\'' && c != '$':\n \t\t\tif c == quote {\n \t\t\t\tquote = 0\n \t\t\t}\n"
+        }
+      }
+    },
+    {
+      "name": "Classify substitutions without enforcing the fix refusal",
+      "scenario": "Refuse an active double-quoted substitution in a fix",
+      "step": "Then init-detect-nested-network-commands: the problems are:",
+      "files": {
+        "setup/init.go": {
+          "patch": "--- a/setup/init.go\n+++ b/setup/init.go\n@@ -947,9 +947,6 @@\n \t\tif initPublishesOrDeploys(command) {\n \t\t\tproblems = append(problems, \"fix command \"+command+\" publishes or deploys\")\n \t\t}\n-\t\tif initContactsRemoteHost(command) {\n-\t\t\tproblems = append(problems, \"fix command \"+command+\" contacts a remote host\")\n-\t\t}\n \t\tif ctx.Env != nil {\n \t\t\tfor _, name := range initUnsetVariables(command, ctx.Env) {\n \t\t\t\tproblems = append(problems, \"fix command \"+command+\" references variable \"+name+\", which is not set in the init environment; use a literal value or a project path instead\")\n"
+        }
+      }
+    },
+    {
+      "name": "Leave setup outside the nested network check",
+      "scenario": "Refuse a backquoted substitution in setup",
+      "step": "Then init-detect-nested-network-commands: the problems are:",
+      "files": {
+        "setup/init.go": {
+          "patch": "--- a/setup/init.go\n+++ b/setup/init.go\n@@ -895,9 +895,6 @@\n \t\tif initPublishesOrDeploys(command) {\n \t\t\tproblems = append(problems, \"setup command \"+command+\" publishes or deploys\")\n \t\t}\n-\t\tif initContactsRemoteHostInSubstitution(command) {\n-\t\t\tproblems = append(problems, \"setup command \"+command+\" contacts a remote host\")\n-\t\t}\n \t\tif ctx.Env != nil {\n \t\t\tfor _, name := range initUnsetVariables(command, ctx.Env) {\n \t\t\t\tproblems = append(problems, \"setup command \"+command+\" references variable \"+name+\", which is not set in the init environment; use a literal value or a project path instead\")\n"
+        }
+      }
+    },
+    {
+      "name": "Ignore remote results below the first substitution",
+      "scenario": "Detect a remote command inside another substitution",
+      "step": "Then init-detect-nested-network-commands: the problems are:",
+      "files": {
+        "setup/init_remote_host.go": {
+          "patch": "--- a/setup/init_remote_host.go\n+++ b/setup/init_remote_host.go\n@@ -102,13 +102,13 @@\n \t\t\twordStart = false\n \t\t\tcontinue\n \t\tcase c == '$' && strings.HasPrefix(rest, \"(\"):\n-\t\t\tbody, n, deeper := initScanRemoteSubstitutions(src[i+2:], true, true)\n+\t\t\tbody, n, _ := initScanRemoteSubstitutions(src[i+2:], true, true)\n \t\t\tif n < 0 {\n \t\t\t\tout.WriteString(src[i:])\n \t\t\t\treturn out.String(), -1, remote\n \t\t\t}\n \t\t\t// Arithmetic expansion is not a command, but may contain one.\n-\t\t\tremote = remote || deeper || (!strings.HasPrefix(rest, \"((\") && initPartsContactRemoteHost(initCommandParts(body)))\n+\t\t\tremote = remote || (!strings.HasPrefix(rest, \"((\") && initPartsContactRemoteHost(initCommandParts(body)))\n \t\t\tout.WriteString(\"$()\")\n \t\t\ti += n + 2\n \t\t\twordStart = false\n"
+        }
+      }
+    },
+    {
+      "name": "Apply the check policy to direct setup commands",
+      "scenario": "Preserve the existing direct setup policy",
+      "step": "Then init-detect-nested-network-commands: the problems are:",
+      "files": {
+        "setup/init.go": {
+          "patch": "--- a/setup/init.go\n+++ b/setup/init.go\n@@ -895,7 +895,7 @@\n \t\tif initPublishesOrDeploys(command) {\n \t\t\tproblems = append(problems, \"setup command \"+command+\" publishes or deploys\")\n \t\t}\n-\t\tif initContactsRemoteHostInSubstitution(command) {\n+\t\tif initContactsRemoteHost(command) {\n \t\t\tproblems = append(problems, \"setup command \"+command+\" contacts a remote host\")\n \t\t}\n \t\tif ctx.Env != nil {\n"
+        }
+      }
+    }
+  ]
+}

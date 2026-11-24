@@ -47,6 +47,23 @@ func TestInitContactsRemoteHost(t *testing.T) {
 		{"'sudo' curl https://example.invalid/x", false},
 		{"sudo", false},
 		{"go test ./...", false},
+		{"echo $(curl https://example.invalid/x)", true},
+		{`echo "$$ (curl https://example.invalid/x)"`, false},
+		{`echo "\q$(curl https://example.invalid/x)"`, true},
+		{"echo ok # $(curl https://example.invalid/x)", false},
+		{`echo $(echo hi # $(curl https://example.invalid/x)
+ echo ok)`, false},
+		{`echo $(echo $(echo ok); curl https://example.invalid/x)`, true},
+		{`echo $(curl https://$(echo example.invalid)/x)`, false},
+		{"echo `curl https://example.invalid/x`", true},
+		{"echo `echo \\$(curl https://example.invalid/x)`", true},
+		{`echo $((1 + $(curl https://example.invalid/x)))`, true},
+		{"echo $(curl http://localhost:8080/x)", false},
+		{`echo "$(printf '%s' "$(curl https://example.invalid/x)")"`, true},
+		{`echo "$(curl 'https://example.invalid/x')"`, true},
+		{`echo '$(curl https://example.invalid/x)'`, false},
+		{`echo "\$(curl https://example.invalid/x)"`, false},
+		{"echo \\`curl https://example.invalid/x\\`", false},
 	}
 	for _, prefix := range []string{"", "sudo ", "env ", "command ", "time ", "env command time ", "sudo sudo "} {
 		for _, tc := range cases {

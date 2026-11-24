@@ -16,7 +16,17 @@ var (
 // only literal command words and literal targets, skipping the transparent literal
 // prefixes sudo, env, command and time; anything else names no host.
 func initContactsRemoteHost(command string) bool {
-	for _, words := range initCommandParts(command) {
+	outer, _, nested := initScanRemoteSubstitutions(command, false, false)
+	return nested || initPartsContactRemoteHost(initCommandParts(outer))
+}
+
+func initSubstitutionContactsRemoteHost(command string) bool {
+	_, _, nested := initScanRemoteSubstitutions(command, false, false)
+	return nested
+}
+
+func initPartsContactRemoteHost(parts [][]string) bool {
+	for _, words := range parts {
 		for len(words) > 0 && (words[0] == "sudo" || words[0] == "env" || words[0] == "command" || words[0] == "time") {
 			words = words[1:]
 		}
@@ -43,6 +53,107 @@ func initContactsRemoteHost(command string) bool {
 		}
 	}
 	return false
+}
+
+// initScanRemoteSubstitutions discovers literal shell substitutions without expanding
+// any word. It masks each completed substitution in the parent so that its text is
+// classified only in its own command context. end is the matching close, when wanted.
+func initScanRemoteSubstitutions(src string, paren, inSubstitution bool) (outer string, end int, remote bool) {
+	var out strings.Builder
+	var quote byte
+	var groupDepth int
+	wordStart := true
+	for i := 0; i < len(src); i++ {
+		c := src[i]
+		rest := src[i+1:]
+		switch {
+		case quote == '\'':
+			if c == quote {
+				quote = 0
+			}
+		case c == '\\' && len(rest) > 0 && (quote == 0 || strings.ContainsRune("$`\"\\\n", rune(rest[0]))):
+			out.WriteString(src[i : i+2])
+			if rest[0] != '\n' {
+				wordStart = false
+			}
+			i++
+			continue
+		case c == '"':
+			if quote == '"' {
+				quote = 0
+			} else {
+				quote = '"'
+			}
+		case quote == 0 && c == '\'':
+			quote = c
+		case quote == 0 && c == '#' && wordStart:
+			n := strings.IndexByte(src[i:], '\n')
+			if n < 0 {
+				n = len(src) - i
+			}
+			if !inSubstitution {
+				out.WriteString(src[i : i+n])
+			}
+			i += n - 1
+			continue
+		case c == '$' && strings.HasPrefix(rest, "$"):
+			out.WriteString("$$")
+			i++
+			wordStart = false
+			continue
+		case c == '$' && strings.HasPrefix(rest, "("):
+			body, n, deeper := initScanRemoteSubstitutions(src[i+2:], true, true)
+			if n < 0 {
+				out.WriteString(src[i:])
+				return out.String(), -1, remote
+			}
+			// Arithmetic expansion is not a command, but may contain one.
+			remote = remote || deeper || (!strings.HasPrefix(rest, "((") && initPartsContactRemoteHost(initCommandParts(body)))
+			out.WriteString("$()")
+			i += n + 2
+			wordStart = false
+			continue
+		case c == '`':
+			if raw, n := initBackquoteBody(rest); n >= 0 {
+				body, _, deeper := initScanRemoteSubstitutions(raw, false, true)
+				remote = remote || deeper || initPartsContactRemoteHost(initCommandParts(body))
+				out.WriteString("$()")
+				i += n + 1
+				wordStart = false
+				continue
+			}
+		case quote == 0 && c == '(':
+			groupDepth++
+		case quote == 0 && c == ')':
+			if groupDepth > 0 {
+				groupDepth--
+			} else if paren {
+				return out.String(), i, remote
+			}
+		}
+		out.WriteByte(c)
+		wordStart = quote == 0 && strings.ContainsRune(" \t\n;|&()<>", rune(c))
+	}
+	return out.String(), -1, remote
+}
+
+func initBackquoteBody(src string) (string, int) {
+	var body strings.Builder
+	for i := 0; i < len(src); i++ {
+		c := src[i]
+		if c == '`' {
+			return body.String(), i
+		}
+		if c == '\\' && i+1 < len(src) && strings.ContainsRune("$`\\\n", rune(src[i+1])) {
+			i++
+			c = src[i]
+			if c == '\n' {
+				continue
+			}
+		}
+		body.WriteByte(c)
+	}
+	return "", -1
 }
 
 // initCommandParts splits command outside quotes on ; & | and newline into whitespace

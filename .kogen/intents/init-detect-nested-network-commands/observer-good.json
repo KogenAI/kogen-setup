@@ -1,0 +1,1 @@
+["check probe (curl https://example.invalid/health) contacts a remote host; checks must not depend on the network"]

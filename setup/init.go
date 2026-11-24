@@ -895,6 +895,9 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		if initPublishesOrDeploys(command) {
 			problems = append(problems, "setup command "+command+" publishes or deploys")
 		}
+		if initSubstitutionContactsRemoteHost(command) {
+			problems = append(problems, "setup command "+command+" contacts a remote host")
+		}
 		if ctx.Env != nil {
 			for _, name := range initUnsetVariables(command, ctx.Env) {
 				problems = append(problems, "setup command "+command+" references variable "+name+", which is not set in the init environment; use a literal value or a project path instead")
