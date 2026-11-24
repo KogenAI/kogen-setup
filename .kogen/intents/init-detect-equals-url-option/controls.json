@@ -1,0 +1,54 @@
+{
+  "correct": {
+    "files": {
+      "setup/init_remote_host.go": {
+        "patch": "--- a/setup/init_remote_host.go\n+++ b/setup/init_remote_host.go\n@@ -141,7 +141,14 @@\n \n func initAnyRemoteURL(args []string) bool {\n \tfor _, arg := range args {\n-\t\tif !strings.HasPrefix(arg, \"-\") && initRemoteURL(arg) {\n+\t\tif strings.HasPrefix(arg, \"-\") {\n+\t\t\t_, value, ok := strings.Cut(arg, \"=\")\n+\t\t\tif !ok {\n+\t\t\t\tcontinue\n+\t\t\t}\n+\t\t\targ = initUnquote(value)\n+\t\t}\n+\t\tif initRemoteURL(arg) {\n \t\t\treturn true\n \t\t}\n \t}\n"
+      },
+      "setup/init_remote_host_test.go": {
+        "patch": "--- a/setup/init_remote_host_test.go\n+++ b/setup/init_remote_host_test.go\n@@ -7,6 +7,12 @@\n \t\tcommand string\n \t\tremote  bool\n \t}{\n+\t\t{\"curl --url=https://api.example.invalid/health\", true},\n+\t\t{\"wget --url=https://example.invalid/x\", true},\n+\t\t{\"curl --url=http://localhost:8080/health\", false},\n+\t\t{\"wget --url=http://localhost:8080/health\", false},\n+\t\t{\"curl --url=file:///tmp/x\", false},\n+\t\t{\"wget --url=file:///tmp/x\", false},\n \t\t{\"curl -fsS https://api.example.invalid/health\", true},\n \t\t{\"curl -fsS \\\"https://api.example.invalid/health\\\"\", true},\n \t\t{\"wget https://example.invalid/x -O x\", true},\n"
+      }
+    }
+  },
+  "wrong": [
+    {
+      "name": "Skip all dash-prefixed arguments",
+      "scenario": "Detect curl equals-form remote URL",
+      "step": "Then init-detect-equals-url-option: problems equal:",
+      "files": {
+        "setup/init_remote_host.go": {
+          "patch": "--- a/setup/init_remote_host.go\n+++ b/setup/init_remote_host.go\n@@ -141,14 +141,7 @@\n \n func initAnyRemoteURL(args []string) bool {\n \tfor _, arg := range args {\n-\t\tif strings.HasPrefix(arg, \"-\") {\n-\t\t\t_, value, ok := strings.Cut(arg, \"=\")\n-\t\t\tif !ok {\n-\t\t\t\tcontinue\n-\t\t\t}\n-\t\t\targ = initUnquote(value)\n-\t\t}\n-\t\tif initRemoteURL(arg) {\n+\t\tif !strings.HasPrefix(arg, \"-\") && initRemoteURL(arg) {\n \t\t\treturn true\n \t\t}\n \t}\n"
+        }
+      }
+    },
+    {
+      "name": "Handle equals-form URLs only for curl",
+      "scenario": "Detect wget equals-form remote URL",
+      "step": "Then init-detect-equals-url-option: problems equal:",
+      "files": {
+        "setup/init_remote_host.go": {
+          "patch": "--- a/setup/init_remote_host.go\n+++ b/setup/init_remote_host.go\n@@ -29,6 +29,15 @@\n \t\t}\n \t\tswitch words[0] {\n \t\tcase \"curl\", \"wget\":\n+\t\t\tif words[0] == \"wget\" {\n+\t\t\t\tvar positional []string\n+\t\t\t\tfor _, arg := range args {\n+\t\t\t\t\tif !strings.HasPrefix(arg, \"-\") {\n+\t\t\t\t\t\tpositional = append(positional, arg)\n+\t\t\t\t\t}\n+\t\t\t\t}\n+\t\t\t\targs = positional\n+\t\t\t}\n \t\t\tif initAnyRemoteURL(args) {\n \t\t\t\treturn true\n \t\t\t}\n"
+        }
+      }
+    },
+    {
+      "name": "Classify every equals-form URL as remote",
+      "scenario": "Preserve local equals-form URL classification",
+      "step": "Then init-detect-equals-url-option: problems equal:",
+      "files": {
+        "setup/init_remote_host.go": {
+          "patch": "--- a/setup/init_remote_host.go\n+++ b/setup/init_remote_host.go\n@@ -147,6 +147,9 @@\n \t\t\t\tcontinue\n \t\t\t}\n \t\t\targ = initUnquote(value)\n+\t\t\tif initURLSchemeRE.MatchString(arg) {\n+\t\t\t\treturn true\n+\t\t\t}\n \t\t}\n \t\tif initRemoteURL(arg) {\n \t\t\treturn true\n"
+        }
+      }
+    },
+    {
+      "name": "Discard positional URLs",
+      "scenario": "Preserve positional URL results",
+      "step": "Then init-detect-equals-url-option: problems equal:",
+      "files": {
+        "setup/init_remote_host.go": {
+          "patch": "--- a/setup/init_remote_host.go\n+++ b/setup/init_remote_host.go\n@@ -147,6 +147,8 @@\n \t\t\t\tcontinue\n \t\t\t}\n \t\t\targ = initUnquote(value)\n+\t\t} else {\n+\t\t\tcontinue\n \t\t}\n \t\tif initRemoteURL(arg) {\n \t\t\treturn true\n"
+        }
+      }
+    }
+  ]
+}

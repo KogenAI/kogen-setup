@@ -141,7 +141,14 @@ func initRemoteURL(arg string) bool {
 
 func initAnyRemoteURL(args []string) bool {
 	for _, arg := range args {
-		if !strings.HasPrefix(arg, "-") && initRemoteURL(arg) {
+		if strings.HasPrefix(arg, "-") {
+			_, value, ok := strings.Cut(arg, "=")
+			if !ok {
+				continue
+			}
+			arg = initUnquote(value)
+		}
+		if initRemoteURL(arg) {
 			return true
 		}
 	}
