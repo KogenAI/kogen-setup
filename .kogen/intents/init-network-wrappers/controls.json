@@ -1,0 +1,41 @@
+{
+  "correct": {
+    "files": {
+      "setup/init_remote_host.go": {
+        "patch": "--- a/setup/init_remote_host.go\n+++ b/setup/init_remote_host.go\n@@ -16,6 +16,9 @@\n // only literal command words and literal targets; anything else names no host.\n func initContactsRemoteHost(command string) bool {\n \tfor _, words := range initCommandParts(command) {\n+\t\tfor len(words) > 0 && (words[0] == \"sudo\" || words[0] == \"env\" || words[0] == \"command\" || words[0] == \"time\") {\n+\t\t\twords = words[1:]\n+\t\t}\n \t\tif len(words) == 0 {\n \t\t\tcontinue\n \t\t}\n"
+      }
+    }
+  },
+  "wrong": [
+    {
+      "name": "only inspect the first command word",
+      "scenario": "Refuse direct and wrapped remote checks",
+      "step": "Then init-network-wrappers: problems equal:",
+      "files": {
+        "setup/init_remote_host.go": {
+          "patch": "--- a/setup/init_remote_host.go\n+++ b/setup/init_remote_host.go\n@@ -16,9 +16,6 @@\n // only literal command words and literal targets; anything else names no host.\n func initContactsRemoteHost(command string) bool {\n \tfor _, words := range initCommandParts(command) {\n-\t\tfor len(words) > 0 && (words[0] == \"sudo\" || words[0] == \"env\" || words[0] == \"command\" || words[0] == \"time\") {\n-\t\t\twords = words[1:]\n-\t\t}\n \t\tif len(words) == 0 {\n \t\t\tcontinue\n \t\t}\n"
+        }
+      }
+    },
+    {
+      "name": "classify every wrapper as remote",
+      "scenario": "Preserve non-remote wrapped targets",
+      "step": "Then init-network-wrappers: problems equal:",
+      "files": {
+        "setup/init_remote_host.go": {
+          "patch": "--- a/setup/init_remote_host.go\n+++ b/setup/init_remote_host.go\n@@ -16,6 +16,9 @@\n // only literal command words and literal targets; anything else names no host.\n func initContactsRemoteHost(command string) bool {\n \tfor _, words := range initCommandParts(command) {\n+\t\tif len(words) > 0 && (words[0] == \"sudo\" || words[0] == \"env\" || words[0] == \"command\" || words[0] == \"time\") {\n+\t\t\treturn true\n+\t\t}\n \t\tfor len(words) > 0 && (words[0] == \"sudo\" || words[0] == \"env\" || words[0] == \"command\" || words[0] == \"time\") {\n \t\t\twords = words[1:]\n \t\t}\n"
+        }
+      }
+    },
+    {
+      "name": "leave wrapped sudo disconnected from validation",
+      "scenario": "Refuse wrapped remote fixers with the fixer diagnostic",
+      "step": "Then init-network-wrappers: problems equal:",
+      "files": {
+        "setup/init.go": {
+          "patch": "--- a/setup/init.go\n+++ b/setup/init.go\n@@ -818,7 +818,7 @@\n \t\tif initPublishesOrDeploys(c.Run) {\n \t\t\tproblems = append(problems, fmt.Sprintf(\"check %s (%s) publishes or deploys\", c.Name, c.Run))\n \t\t}\n-\t\tif initContactsRemoteHost(c.Run) {\n+\t\tif initContactsRemoteHost(c.Run) && !strings.HasPrefix(c.Run, \"sudo \") {\n \t\t\tproblems = append(problems, fmt.Sprintf(\"check %s (%s) contacts a remote host; checks must not depend on the network\", c.Name, c.Run))\n \t\t}\n \t\tif initRunsNothing(c.Run, false) {\n@@ -944,7 +944,7 @@\n \t\tif initPublishesOrDeploys(command) {\n \t\t\tproblems = append(problems, \"fix command \"+command+\" publishes or deploys\")\n \t\t}\n-\t\tif initContactsRemoteHost(command) {\n+\t\tif initContactsRemoteHost(command) && !strings.HasPrefix(command, \"sudo \") {\n \t\t\tproblems = append(problems, \"fix command \"+command+\" contacts a remote host\")\n \t\t}\n \t\tif ctx.Env != nil {\n"
+        }
+      }
+    }
+  ]
+}

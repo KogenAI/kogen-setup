@@ -13,9 +13,13 @@ var (
 
 // initContactsRemoteHost reports whether a part of command runs curl, wget, ping, nc, telnet,
 // ssh or git ls-remote against a host that is neither loopback nor a local path. It reads
-// only literal command words and literal targets; anything else names no host.
+// only literal command words and literal targets, skipping the transparent literal
+// prefixes sudo, env, command and time; anything else names no host.
 func initContactsRemoteHost(command string) bool {
 	for _, words := range initCommandParts(command) {
+		for len(words) > 0 && (words[0] == "sudo" || words[0] == "env" || words[0] == "command" || words[0] == "time") {
+			words = words[1:]
+		}
 		if len(words) == 0 {
 			continue
 		}

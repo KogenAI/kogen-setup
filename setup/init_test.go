@@ -2444,3 +2444,26 @@ func TestInitAddsTheBridgeWhenThereIsNoStepsReadme(t *testing.T) {
 		t.Fatalf("commit files %v", got)
 	}
 }
+
+func TestInitValidateWrappedRemoteHost(t *testing.T) {
+	for _, command := range []string{
+		"sudo curl https://example.invalid/x",
+		"env wget https://example.invalid/x",
+		"command ping example.invalid",
+		"time ssh user@example.invalid true",
+		"env command time git ls-remote git@example.invalid:o/r.git",
+	} {
+		t.Run(command, func(t *testing.T) {
+			_, problems := Validate(map[string]any{"checks": initCheckList("probe", command)}, InitContext{})
+			want := []string{"check probe (" + command + ") contacts a remote host; checks must not depend on the network"}
+			if !slices.Equal(problems, want) {
+				t.Fatalf("check problems = %q, want %q", problems, want)
+			}
+			_, problems = Validate(map[string]any{"fix": []any{command}}, InitContext{})
+			want = []string{"fix command " + command + " contacts a remote host"}
+			if !slices.Equal(problems, want) {
+				t.Fatalf("fix problems = %q, want %q", problems, want)
+			}
+		})
+	}
+}

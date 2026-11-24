@@ -18,6 +18,7 @@ func TestInitContactsRemoteHost(t *testing.T) {
 		{"git ls-remote https://example.invalid/r.git", true},
 		{"git ls-remote git@example.invalid:o/r.git", true},
 		{"go test ./... && wget https://example.invalid/x", true},
+		{"go test ./... && sudo curl https://example.invalid/x", true},
 		{"curl -fsS http://localhost:8080/health", false},
 		{"curl -fsS http://127.0.0.1:3000", false},
 		{"curl -fsS http://[::1]:3000/", false},
@@ -33,13 +34,22 @@ func TestInitContactsRemoteHost(t *testing.T) {
 		{"echo \"curl https://example.invalid\"", false},
 		{"echo curl https://example.invalid", false},
 		{"nc $HOST 80", false},
+		{"curl https://$HOST/x", false},
+		{"git ls-remote git@localhost:o/r.git", false},
+		{"'curl' https://example.invalid/x", false},
+		{"$COMMAND https://example.invalid/x", false},
+		{"'sudo' curl https://example.invalid/x", false},
+		{"sudo", false},
 		{"go test ./...", false},
 	}
-	for _, tc := range cases {
-		t.Run(tc.command, func(t *testing.T) {
-			if got := initContactsRemoteHost(tc.command); got != tc.remote {
-				t.Fatalf("initContactsRemoteHost(%q) = %v, want %v", tc.command, got, tc.remote)
-			}
-		})
+	for _, prefix := range []string{"", "sudo ", "env ", "command ", "time ", "env command time ", "sudo sudo "} {
+		for _, tc := range cases {
+			command := prefix + tc.command
+			t.Run(command, func(t *testing.T) {
+				if got := initContactsRemoteHost(command); got != tc.remote {
+					t.Fatalf("initContactsRemoteHost(%q) = %v, want %v", command, got, tc.remote)
+				}
+			})
+		}
 	}
 }
