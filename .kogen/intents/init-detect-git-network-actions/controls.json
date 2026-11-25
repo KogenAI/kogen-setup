@@ -1,0 +1,87 @@
+{
+  "correct": {
+    "files": {
+      "setup/init_remote_host.go": {
+        "patch": "--- a/setup/init_remote_host.go\n+++ b/setup/init_remote_host.go\n@@ -1,8 +1,12 @@\n package setup\n \n import (\n+\t\"context\"\n+\t\"os/exec\"\n \t\"regexp\"\n+\t\"slices\"\n \t\"strings\"\n+\t\"time\"\n \t\"unicode\"\n )\n \n@@ -15,17 +19,17 @@\n // ssh or git ls-remote against a host that is neither loopback nor a local path. It reads\n // only literal command words and literal targets, skipping the transparent literal\n // prefixes sudo, env, command and time; anything else names no host.\n-func initContactsRemoteHost(command string) bool {\n-\touter, _, nested := initScanRemoteSubstitutions(command, false, false)\n-\treturn nested || initPartsContactRemoteHost(initCommandParts(outer))\n-}\n-\n-func initSubstitutionContactsRemoteHost(command string) bool {\n-\t_, _, nested := initScanRemoteSubstitutions(command, false, false)\n+func initContactsRemoteHost(command, root string) bool {\n+\touter, _, nested := initScanRemoteSubstitutions(command, root, false, false)\n+\treturn nested || initPartsContactRemoteHost(initCommandParts(outer), root)\n+}\n+\n+func initSubstitutionContactsRemoteHost(command, root string) bool {\n+\t_, _, nested := initScanRemoteSubstitutions(command, root, false, false)\n \treturn nested\n }\n \n-func initPartsContactRemoteHost(parts [][]string) bool {\n+func initPartsContactRemoteHost(parts [][]string, root string) bool {\n \tfor _, words := range parts {\n \t\tfor len(words) > 0 && (words[0] == \"sudo\" || words[0] == \"env\" || words[0] == \"command\" || words[0] == \"time\") {\n \t\t\twords = words[1:]\n@@ -43,8 +47,17 @@\n \t\t\t\treturn true\n \t\t\t}\n \t\tcase \"git\":\n-\t\t\tif len(words) > 1 && words[1] == \"ls-remote\" && initAnyRemoteGit(args[1:]) {\n-\t\t\t\treturn true\n+\t\t\tif len(words) > 1 {\n+\t\t\t\tswitch words[1] {\n+\t\t\t\tcase \"ls-remote\":\n+\t\t\t\t\tif initAnyRemoteGit(args[1:]) {\n+\t\t\t\t\t\treturn true\n+\t\t\t\t\t}\n+\t\t\t\tcase \"fetch\", \"pull\", \"clone\":\n+\t\t\t\t\tif initRemoteGitSource(words[1], args[1:], root) {\n+\t\t\t\t\t\treturn true\n+\t\t\t\t\t}\n+\t\t\t\t}\n \t\t\t}\n \t\tcase \"ping\", \"nc\", \"telnet\", \"ssh\":\n \t\t\tif initRemotePositional(args) {\n@@ -58,7 +71,7 @@\n // initScanRemoteSubstitutions discovers literal shell substitutions without expanding\n // any word. It masks each completed substitution in the parent so that its text is\n // classified only in its own command context. end is the matching close, when wanted.\n-func initScanRemoteSubstitutions(src string, paren, inSubstitution bool) (outer string, end int, remote bool) {\n+func initScanRemoteSubstitutions(src, root string, paren, inSubstitution bool) (outer string, end int, remote bool) {\n \tvar out strings.Builder\n \tvar quote byte\n \tvar groupDepth int\n@@ -102,21 +115,21 @@\n \t\t\twordStart = false\n \t\t\tcontinue\n \t\tcase c == '$' && strings.HasPrefix(rest, \"(\"):\n-\t\t\tbody, n, deeper := initScanRemoteSubstitutions(src[i+2:], true, true)\n+\t\t\tbody, n, deeper := initScanRemoteSubstitutions(src[i+2:], root, true, true)\n \t\t\tif n < 0 {\n \t\t\t\tout.WriteString(src[i:])\n \t\t\t\treturn out.String(), -1, remote\n \t\t\t}\n \t\t\t// Arithmetic expansion is not a command, but may contain one.\n-\t\t\tremote = remote || deeper || (!strings.HasPrefix(rest, \"((\") && initPartsContactRemoteHost(initCommandParts(body)))\n+\t\t\tremote = remote || deeper || (!strings.HasPrefix(rest, \"((\") && initPartsContactRemoteHost(initCommandParts(body), root))\n \t\t\tout.WriteString(\"$()\")\n \t\t\ti += n + 2\n \t\t\twordStart = false\n \t\t\tcontinue\n \t\tcase c == '`':\n \t\t\tif raw, n := initBackquoteBody(rest); n >= 0 {\n-\t\t\t\tbody, _, deeper := initScanRemoteSubstitutions(raw, false, true)\n-\t\t\t\tremote = remote || deeper || initPartsContactRemoteHost(initCommandParts(body))\n+\t\t\t\tbody, _, deeper := initScanRemoteSubstitutions(raw, root, false, true)\n+\t\t\t\tremote = remote || deeper || initPartsContactRemoteHost(initCommandParts(body), root)\n \t\t\t\tout.WriteString(\"$()\")\n \t\t\t\ti += n + 1\n \t\t\t\twordStart = false\n@@ -297,3 +310,76 @@\n \t}\n \treturn false\n }\n+\n+var (\n+\tinitGitSourceSCPRE = regexp.MustCompile(`^(?:[^/:@\\s]+@)?(\\[[^\\]]+\\]|[^/:@\\s]+):`)\n+)\n+\n+func initRemoteGitSource(action string, args []string, root string) bool {\n+\tsource := initGitSource(action, args)\n+\tif initURLSchemeRE.MatchString(source) {\n+\t\treturn initRemoteURL(source)\n+\t}\n+\tif m := initGitSourceSCPRE.FindStringSubmatch(source); m != nil {\n+\t\treturn !initDynamic(m[1]) && !initLoopbackHost(m[1])\n+\t}\n+\t// A pull repository may name a configured remote rather than a local path.\n+\treturn action == \"pull\" && initConfiguredGitRemote(root, source)\n+}\n+\n+// initGitSource reads the repository operand, not a destination, refspec or flag value.\n+func initGitSource(action string, args []string) string {\n+\tlongValues := \" --depth --shallow-since --shallow-exclude --upload-pack --server-option --filter --jobs \"\n+\tvar shortValues string\n+\tswitch action {\n+\tcase \"clone\":\n+\t\tlongValues += \"--template --reference --reference-if-able --origin --branch --revision --separate-git-dir --ref-format --config --bundle-uri \"\n+\t\tshortValues = \"jobuc\"\n+\tcase \"pull\":\n+\t\tlongValues += \"--cleanup --strategy --strategy-option --deepen --refmap --negotiation-tip \"\n+\t\tshortValues = \"jsXo\"\n+\tcase \"fetch\":\n+\t\tlongValues += \"--deepen --refmap --negotiation-tip \"\n+\t\tshortValues = \"jo\"\n+\t}\n+\tfor i := 0; i < len(args); i++ {\n+\t\targ := args[i]\n+\t\tif arg == \"--\" {\n+\t\t\tif i+1 < len(args) {\n+\t\t\t\treturn args[i+1]\n+\t\t\t}\n+\t\t\treturn \"\"\n+\t\t}\n+\t\tif arg == \"-\" || !strings.HasPrefix(arg, \"-\") {\n+\t\t\treturn arg\n+\t\t}\n+\t\tif strings.HasPrefix(arg, \"--\") {\n+\t\t\tif strings.Contains(longValues, \" \"+arg+\" \") {\n+\t\t\t\ti++\n+\t\t\t}\n+\t\t\tcontinue\n+\t\t}\n+\t\tfor j, flag := range arg[1:] {\n+\t\t\tif strings.ContainsRune(shortValues, flag) {\n+\t\t\t\tif j+2 == len(arg) {\n+\t\t\t\t\ti++\n+\t\t\t\t}\n+\t\t\t\tbreak\n+\t\t\t}\n+\t\t}\n+\t}\n+\treturn \"\"\n+}\n+\n+// initConfiguredGitRemote only checks for the name; it does not resolve its URL.\n+func initConfiguredGitRemote(root, name string) bool {\n+\tif root == \"\" || name == \"\" || name == \".\" || name == \"..\" || strings.HasPrefix(name, \"./\") || strings.HasPrefix(name, \"../\") || strings.HasPrefix(name, \"/\") || initDynamic(name) {\n+\t\treturn false\n+\t}\n+\tctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)\n+\tdefer cancel()\n+\tcmd := exec.CommandContext(ctx, \"git\", \"remote\")\n+\tcmd.Dir = root\n+\tout, err := cmd.Output()\n+\treturn err == nil && slices.Contains(strings.Split(string(out), \"\\n\"), name)\n+}\n"
+      },
+      "setup/init_remote_host_test.go": {
+        "patch": "--- a/setup/init_remote_host_test.go\n+++ b/setup/init_remote_host_test.go\n@@ -21,6 +21,17 @@\n \t\t{\"nc example.invalid 443\", true},\n \t\t{\"telnet example.invalid 23\", true},\n \t\t{\"ssh user@example.invalid true\", true},\n+\t\t{\"git fetch https://example.invalid/repo.git\", true},\n+\t\t{\"git fetch git@example.invalid:team/repo.git\", true},\n+\t\t{\"git pull https://example.invalid/repo.git main\", true},\n+\t\t{\"git clone https://example.invalid/repo.git copy\", true},\n+\t\t{\"git clone --depth 1 -- 'ssh://git@example.invalid/repo.git' copy\", true},\n+\t\t{\"git fetch ./repo.git main\", false},\n+\t\t{\"git fetch file:///tmp/repo.git\", false},\n+\t\t{\"git fetch http://localhost:8080/repo.git\", false},\n+\t\t{\"git pull ./repo.git main\", false},\n+\t\t{\"git clone repo.git copy\", false},\n+\t\t{\"git clone ./repo.git 'example.invalid:local-copy'\", false},\n \t\t{\"git ls-remote https://example.invalid/r.git\", true},\n \t\t{\"git ls-remote git@example.invalid:o/r.git\", true},\n \t\t{\"go test ./... && wget https://example.invalid/x\", true},\n@@ -69,7 +80,7 @@\n \t\tfor _, tc := range cases {\n \t\t\tcommand := prefix + tc.command\n \t\t\tt.Run(command, func(t *testing.T) {\n-\t\t\t\tif got := initContactsRemoteHost(command); got != tc.remote {\n+\t\t\t\tif got := initContactsRemoteHost(command, \"\"); got != tc.remote {\n \t\t\t\t\tt.Fatalf(\"initContactsRemoteHost(%q) = %v, want %v\", command, got, tc.remote)\n \t\t\t\t}\n \t\t\t})\n"
+      },
+      "setup/init.go": {
+        "patch": "--- a/setup/init.go\n+++ b/setup/init.go\n@@ -818,7 +818,7 @@\n \t\tif initPublishesOrDeploys(c.Run) {\n \t\t\tproblems = append(problems, fmt.Sprintf(\"check %s (%s) publishes or deploys\", c.Name, c.Run))\n \t\t}\n-\t\tif initContactsRemoteHost(c.Run) {\n+\t\tif initContactsRemoteHost(c.Run, ctx.Root) {\n \t\t\tproblems = append(problems, fmt.Sprintf(\"check %s (%s) contacts a remote host; checks must not depend on the network\", c.Name, c.Run))\n \t\t}\n \t\tif initRunsNothing(c.Run, false) {\n@@ -895,7 +895,7 @@\n \t\tif initPublishesOrDeploys(command) {\n \t\t\tproblems = append(problems, \"setup command \"+command+\" publishes or deploys\")\n \t\t}\n-\t\tif initSubstitutionContactsRemoteHost(command) {\n+\t\tif initSubstitutionContactsRemoteHost(command, ctx.Root) {\n \t\t\tproblems = append(problems, \"setup command \"+command+\" contacts a remote host\")\n \t\t}\n \t\tif ctx.Env != nil {\n@@ -947,7 +947,7 @@\n \t\tif initPublishesOrDeploys(command) {\n \t\t\tproblems = append(problems, \"fix command \"+command+\" publishes or deploys\")\n \t\t}\n-\t\tif initContactsRemoteHost(command) {\n+\t\tif initContactsRemoteHost(command, ctx.Root) {\n \t\t\tproblems = append(problems, \"fix command \"+command+\" contacts a remote host\")\n \t\t}\n \t\tif ctx.Env != nil {\n"
+      }
+    }
+  },
+  "wrong": [
+    {
+      "name": "Leave recognition at ls-remote only",
+      "scenario": "Refuse a fetch from a remote URL",
+      "step": "Then init-detect-git-network-actions: validation problems equal:",
+      "files": {
+        "setup/init_remote_host.go": {
+          "patch": "--- a/setup/init_remote_host.go\n+++ b/setup/init_remote_host.go\n@@ -53,10 +53,7 @@\n \t\t\t\t\tif initAnyRemoteGit(args[1:]) {\n \t\t\t\t\t\treturn true\n \t\t\t\t\t}\n-\t\t\t\tcase \"fetch\", \"pull\", \"clone\":\n-\t\t\t\t\tif initRemoteGitSource(words[1], args[1:], root) {\n-\t\t\t\t\t\treturn true\n-\t\t\t\t\t}\n+\n \t\t\t\t}\n \t\t\t}\n \t\tcase \"ping\", \"nc\", \"telnet\", \"ssh\":\n"
+        }
+      }
+    },
+    {
+      "name": "Require a literal host even for named pulls",
+      "scenario": "Refuse a pull by remote name",
+      "step": "Then init-detect-git-network-actions: validation problems equal:",
+      "files": {
+        "setup/init_remote_host.go": {
+          "patch": "--- a/setup/init_remote_host.go\n+++ b/setup/init_remote_host.go\n@@ -324,7 +324,7 @@\n \t\treturn !initDynamic(m[1]) && !initLoopbackHost(m[1])\n \t}\n \t// A pull repository may name a configured remote rather than a local path.\n-\treturn action == \"pull\" && initConfiguredGitRemote(root, source)\n+\treturn false\n }\n \n // initGitSource reads the repository operand, not a destination, refspec or flag value.\n"
+        }
+      }
+    },
+    {
+      "name": "Omit clone from the checked Git actions",
+      "scenario": "Refuse a clone from a remote URL",
+      "step": "Then init-detect-git-network-actions: validation problems equal:",
+      "files": {
+        "setup/init_remote_host.go": {
+          "patch": "--- a/setup/init_remote_host.go\n+++ b/setup/init_remote_host.go\n@@ -53,7 +53,7 @@\n \t\t\t\t\tif initAnyRemoteGit(args[1:]) {\n \t\t\t\t\t\treturn true\n \t\t\t\t\t}\n-\t\t\t\tcase \"fetch\", \"pull\", \"clone\":\n+\t\t\t\tcase \"fetch\", \"pull\":\n \t\t\t\t\tif initRemoteGitSource(words[1], args[1:], root) {\n \t\t\t\t\t\treturn true\n \t\t\t\t\t}\n"
+        }
+      }
+    },
+    {
+      "name": "Classify every fetch as remote",
+      "scenario": "Allow a fetch from a local path",
+      "step": "Then init-detect-git-network-actions: validation problems equal:",
+      "files": {
+        "setup/init_remote_host.go": {
+          "patch": "--- a/setup/init_remote_host.go\n+++ b/setup/init_remote_host.go\n@@ -316,6 +316,9 @@\n )\n \n func initRemoteGitSource(action string, args []string, root string) bool {\n+\tif action == \"fetch\" {\n+\t\treturn true\n+\t}\n \tsource := initGitSource(action, args)\n \tif initURLSchemeRE.MatchString(source) {\n \t\treturn initRemoteURL(source)\n"
+        }
+      }
+    },
+    {
+      "name": "Classify every clone as remote",
+      "scenario": "Allow a clone from a local path",
+      "step": "Then init-detect-git-network-actions: validation problems equal:",
+      "files": {
+        "setup/init_remote_host.go": {
+          "patch": "--- a/setup/init_remote_host.go\n+++ b/setup/init_remote_host.go\n@@ -316,6 +316,9 @@\n )\n \n func initRemoteGitSource(action string, args []string, root string) bool {\n+\tif action == \"clone\" {\n+\t\treturn true\n+\t}\n \tsource := initGitSource(action, args)\n \tif initURLSchemeRE.MatchString(source) {\n \t\treturn initRemoteURL(source)\n"
+        }
+      }
+    },
+    {
+      "name": "Detect Git actions without enforcing the check refusal",
+      "scenario": "Refuse a fetch from a remote URL",
+      "step": "Then init-detect-git-network-actions: validation problems equal:",
+      "files": {
+        "setup/init.go": {
+          "patch": "--- a/setup/init.go\n+++ b/setup/init.go\n@@ -818,7 +818,7 @@\n \t\tif initPublishesOrDeploys(c.Run) {\n \t\t\tproblems = append(problems, fmt.Sprintf(\"check %s (%s) publishes or deploys\", c.Name, c.Run))\n \t\t}\n-\t\tif initContactsRemoteHost(c.Run, ctx.Root) {\n+\t\tif initContactsRemoteHost(c.Run, ctx.Root) && !(strings.HasPrefix(c.Run, \"git fetch \") || strings.HasPrefix(c.Run, \"git pull \") || strings.HasPrefix(c.Run, \"git clone \")) {\n \t\t\tproblems = append(problems, fmt.Sprintf(\"check %s (%s) contacts a remote host; checks must not depend on the network\", c.Name, c.Run))\n \t\t}\n \t\tif initRunsNothing(c.Run, false) {\n"
+        }
+      }
+    },
+    {
+      "name": "Classify every bare pull operand as a remote name",
+      "scenario": "Allow a pull by bare local path",
+      "step": "Then init-detect-git-network-actions: validation problems equal:",
+      "files": {
+        "setup/init_remote_host.go": {
+          "patch": "--- a/setup/init_remote_host.go\n+++ b/setup/init_remote_host.go\n@@ -324,7 +324,7 @@\n \t\treturn !initDynamic(m[1]) && !initLoopbackHost(m[1])\n \t}\n \t// A pull repository may name a configured remote rather than a local path.\n-\treturn action == \"pull\" && initConfiguredGitRemote(root, source)\n+\treturn action == \"pull\" && source != \"\" && !strings.Contains(source, \"/\")\n }\n \n // initGitSource reads the repository operand, not a destination, refspec or flag value.\n"
+        }
+      }
+    }
+  ]
+}

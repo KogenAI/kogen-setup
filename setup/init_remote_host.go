@@ -7,25 +7,30 @@ import (
 )
 
 var (
-	initURLSchemeRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]*://`)
-	initSCPTargetRE = regexp.MustCompile(`^[^/:@\s]+@([^/:\s]+):`)
+	initURLSchemeRE    = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]*://`)
+	initSCPTargetRE    = regexp.MustCompile(`^[^/:@\s]+@([^/:\s]+):`)
+	initGitSCPSourceRE = regexp.MustCompile(`^(?:[^/:@\s]+@)?(\[[^\]]+\]|[^/:\s]+):`)
 )
 
 // initContactsRemoteHost reports whether a part of command runs curl, wget, ping, nc, telnet,
-// ssh or git ls-remote against a host that is neither loopback nor a local path. It reads
+// ssh or literal git network actions against a host that is neither loopback nor a local path. It reads
 // only literal command words and literal targets, skipping the transparent literal
 // prefixes sudo, env, command and time; anything else names no host.
 func initContactsRemoteHost(command string) bool {
-	outer, _, nested := initScanRemoteSubstitutions(command, false, false)
-	return nested || initPartsContactRemoteHost(initCommandParts(outer))
+	return initContactsRemoteHostWithRemotes(command, nil)
+}
+
+func initContactsRemoteHostWithRemotes(command string, remotes map[string]bool) bool {
+	outer, _, nested := initScanRemoteSubstitutions(command, false, false, remotes)
+	return nested || initPartsContactRemoteHost(initCommandParts(outer), remotes)
 }
 
 func initSubstitutionContactsRemoteHost(command string) bool {
-	_, _, nested := initScanRemoteSubstitutions(command, false, false)
+	_, _, nested := initScanRemoteSubstitutions(command, false, false, nil)
 	return nested
 }
 
-func initPartsContactRemoteHost(parts [][]string) bool {
+func initPartsContactRemoteHost(parts [][]string, remotes map[string]bool) bool {
 	for _, words := range parts {
 		for len(words) > 0 && (words[0] == "sudo" || words[0] == "env" || words[0] == "command" || words[0] == "time") {
 			words = words[1:]
@@ -43,8 +48,17 @@ func initPartsContactRemoteHost(parts [][]string) bool {
 				return true
 			}
 		case "git":
-			if len(words) > 1 && words[1] == "ls-remote" && initAnyRemoteGit(args[1:]) {
-				return true
+			if len(words) > 1 {
+				action := words[1]
+				if action == "ls-remote" && initAnyRemoteGit(args[1:]) {
+					return true
+				}
+				if action == "fetch" || action == "pull" || action == "clone" {
+					source := initGitRepository(action, args[1:])
+					if initRemoteGitSource(source) || (action == "pull" && !strings.HasPrefix(source, "./") && !strings.HasPrefix(source, "../") && !strings.HasPrefix(source, "/") && !initDynamic(source) && remotes[source]) {
+						return true
+					}
+				}
 			}
 		case "ping", "nc", "telnet", "ssh":
 			if initRemotePositional(args) {
@@ -58,7 +72,7 @@ func initPartsContactRemoteHost(parts [][]string) bool {
 // initScanRemoteSubstitutions discovers literal shell substitutions without expanding
 // any word. It masks each completed substitution in the parent so that its text is
 // classified only in its own command context. end is the matching close, when wanted.
-func initScanRemoteSubstitutions(src string, paren, inSubstitution bool) (outer string, end int, remote bool) {
+func initScanRemoteSubstitutions(src string, paren, inSubstitution bool, remotes map[string]bool) (outer string, end int, remote bool) {
 	var out strings.Builder
 	var quote byte
 	var groupDepth int
@@ -102,21 +116,21 @@ func initScanRemoteSubstitutions(src string, paren, inSubstitution bool) (outer 
 			wordStart = false
 			continue
 		case c == '$' && strings.HasPrefix(rest, "("):
-			body, n, deeper := initScanRemoteSubstitutions(src[i+2:], true, true)
+			body, n, deeper := initScanRemoteSubstitutions(src[i+2:], true, true, remotes)
 			if n < 0 {
 				out.WriteString(src[i:])
 				return out.String(), -1, remote
 			}
 			// Arithmetic expansion is not a command, but may contain one.
-			remote = remote || deeper || (!strings.HasPrefix(rest, "((") && initPartsContactRemoteHost(initCommandParts(body)))
+			remote = remote || deeper || (!strings.HasPrefix(rest, "((") && initPartsContactRemoteHost(initCommandParts(body), remotes))
 			out.WriteString("$()")
 			i += n + 2
 			wordStart = false
 			continue
 		case c == '`':
 			if raw, n := initBackquoteBody(rest); n >= 0 {
-				body, _, deeper := initScanRemoteSubstitutions(raw, false, true)
-				remote = remote || deeper || initPartsContactRemoteHost(initCommandParts(body))
+				body, _, deeper := initScanRemoteSubstitutions(raw, false, true, remotes)
+				remote = remote || deeper || initPartsContactRemoteHost(initCommandParts(body), remotes)
 				out.WriteString("$()")
 				i += n + 1
 				wordStart = false
@@ -279,6 +293,58 @@ func initAnyRemoteGit(args []string) bool {
 		}
 	}
 	return false
+}
+
+func initRemoteGitSource(source string) bool {
+	if initURLSchemeRE.MatchString(source) {
+		return initRemoteURL(source)
+	}
+	m := initGitSCPSourceRE.FindStringSubmatch(source)
+	return m != nil && !initDynamic(m[1]) && !initLoopbackHost(m[1])
+}
+
+// initGitRepository selects the first positional operand, skipping option values.
+func initGitRepository(action string, args []string) string {
+	longValues := " --depth --deepen --shallow-since --shallow-exclude --upload-pack --server-option --filter --refmap --negotiation-tip "
+	var shortValues string
+	switch action {
+	case "clone":
+		longValues += "--jobs --template --reference --reference-if-able --origin --branch --revision --separate-git-dir --ref-format --config --bundle-uri "
+		shortValues = "jobuc"
+	case "fetch":
+		longValues += "--jobs "
+		shortValues = "jo"
+	case "pull":
+		longValues += "--cleanup --strategy --strategy-option "
+		shortValues = "sXo"
+	}
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			if i+1 < len(args) {
+				return args[i+1]
+			}
+			return ""
+		}
+		if arg == "-" || !strings.HasPrefix(arg, "-") {
+			return arg
+		}
+		if strings.HasPrefix(arg, "--") {
+			if strings.Contains(longValues, " "+arg+" ") {
+				i++
+			}
+			continue
+		}
+		for j, flag := range arg[1:] {
+			if strings.ContainsRune(shortValues, flag) {
+				if j+2 == len(arg) {
+					i++
+				}
+				break
+			}
+		}
+	}
+	return ""
 }
 
 // initRemotePositional checks the first positional argument that is not purely numeric.

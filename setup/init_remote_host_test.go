@@ -1,6 +1,12 @@
 package setup
 
-import "testing"
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"reflect"
+	"testing"
+)
 
 func TestInitContactsRemoteHost(t *testing.T) {
 	cases := []struct {
@@ -21,6 +27,22 @@ func TestInitContactsRemoteHost(t *testing.T) {
 		{"nc example.invalid 443", true},
 		{"telnet example.invalid 23", true},
 		{"ssh user@example.invalid true", true},
+		{"git fetch https://example.invalid/r.git main", true},
+		{"git fetch -u https://example.invalid/r.git", true},
+		{"git pull --strategy recursive https://example.invalid/r.git", true},
+		{"git clone --bundle-uri https://example.invalid/bundle ./repo", false},
+		{"git fetch -vo https://example.invalid/option ./repo", false},
+		{"git clone '[::1]:repo' copy", false},
+		{"git clone '[2001:db8::1]:repo' copy", true},
+		{"git pull https://example.invalid/r.git main", true},
+		{"git clone --depth 1 -- 'ssh://git@example.invalid/r.git' copy", true},
+		{"git fetch git@example.invalid:o/r.git", true},
+		{"git clone example.invalid:repo copy", true},
+		{"git fetch --upload-pack https://example.invalid/tool ./repo main", false},
+		{"git fetch ./repo https://example.invalid/ref", false},
+		{"git clone ./repo git@example.invalid:copy", false},
+		{"git pull file:///tmp/repo main", false},
+		{"git fetch http://localhost:8080/repo", false},
 		{"git ls-remote https://example.invalid/r.git", true},
 		{"git ls-remote git@example.invalid:o/r.git", true},
 		{"go test ./... && wget https://example.invalid/x", true},
@@ -74,5 +96,38 @@ func TestInitContactsRemoteHost(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestInitValidatePullRemoteNames(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"origin", "repo.git"} {
+		if err := os.Mkdir(filepath.Join(root, name), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, args := range [][]string{{"init", root}, {"-C", root, "remote", "add", "origin", "./repo.git"}, {"-C", root, "remote", "add", "team/origin", "./repo.git"}} {
+		if output, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, output)
+		}
+	}
+	for _, tc := range []struct {
+		command  string
+		problems []string
+	}{
+		{"git fetch https://example.invalid/repo.git", []string{"check probe (git fetch https://example.invalid/repo.git) contacts a remote host; checks must not depend on the network"}},
+		{"git clone https://example.invalid/repo.git copy", []string{"check probe (git clone https://example.invalid/repo.git copy) contacts a remote host; checks must not depend on the network"}},
+		{"git push https://example.invalid/repo.git", []string{"check probe (git push https://example.invalid/repo.git) publishes or deploys"}},
+		{"git pull team/origin main", []string{"check probe (git pull team/origin main) contacts a remote host; checks must not depend on the network"}},
+		{"git pull origin main", []string{"check probe (git pull origin main) contacts a remote host; checks must not depend on the network"}},
+		{"git pull repo.git main", nil},
+		{"git pull ./origin main", nil},
+	} {
+		t.Run(tc.command, func(t *testing.T) {
+			_, got := Validate(map[string]any{"checks": []any{map[string]any{"name": "probe", "run": tc.command}}}, InitContext{Root: root})
+			if !reflect.DeepEqual(got, tc.problems) {
+				t.Fatalf("problems = %v, want %v", got, tc.problems)
+			}
+		})
 	}
 }

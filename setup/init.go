@@ -676,6 +676,23 @@ type InitContext struct {
 	Env []string
 }
 
+// initGitRemoteNames lists names only; it does not inspect remote destinations.
+func initGitRemoteNames(root string) map[string]bool {
+	names := make(map[string]bool)
+	if root == "" {
+		return names
+	}
+	cmd := exec.Command("git", "remote")
+	cmd.Dir = root
+	output, err := cmd.Output()
+	if err == nil {
+		for _, name := range strings.Fields(string(output)) {
+			names[name] = true
+		}
+	}
+	return names
+}
+
 // Validate checks the arguments of a submit_configuration call (SET-11). It returns the
 // proposal, or the problems that go back to the model.
 func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
@@ -818,7 +835,7 @@ func Validate(args map[string]any, ctx InitContext) (InitProposal, []string) {
 		if initPublishesOrDeploys(c.Run) {
 			problems = append(problems, fmt.Sprintf("check %s (%s) publishes or deploys", c.Name, c.Run))
 		}
-		if initContactsRemoteHost(c.Run) {
+		if initContactsRemoteHostWithRemotes(c.Run, initGitRemoteNames(ctx.Root)) {
 			problems = append(problems, fmt.Sprintf("check %s (%s) contacts a remote host; checks must not depend on the network", c.Name, c.Run))
 		}
 		if initRunsNothing(c.Run, false) {
